@@ -64,7 +64,10 @@ jobs:
       - run: npm run tauri -w apps/desktop -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: Verify installer exists
         shell: bash
-        run: rg --files --no-ignore target/${{ matrix.target }}/release/bundle/${{ matrix.bundles }} | rg '\.(exe|dmg)$'
+        run: |
+          shopt -s nullglob
+          hop_installers=(target/${{ matrix.target }}/release/bundle/${{ matrix.bundles }}/*.{exe,dmg})
+          test "${#hop_installers[@]}" -gt 0
       - uses: actions/upload-artifact@v4
         with:
           name: hopping-cursor-${{ matrix.label }}
