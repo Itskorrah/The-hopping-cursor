@@ -5,10 +5,11 @@ offset/hidden topology, invalid layouts, safe filenames, actual two-service
 encrypted pairing and trust, acceptance/refusal, duplicate files and byte
 integrity, clipboard exchange, held-key handoff, emergency release, disconnect,
 revocation, quotas, and diagnostics exclusion. The suite currently contains
-26 Rust tests: 13 unit/security tests and 13 encrypted-network integration tests.
+27 Rust tests: 14 unit/security tests and 13 encrypted-network integration tests.
 Additional regressions reject ciphertext tampering/replay, malformed/trailing
 messages, preserve fragmented reads during outbound traffic, bypass saturated
-queues for recovery, consume hop chords, and cancel pending offers on pause.
+queues for recovery, keep native callbacks responsive while configuration is
+locked, consume hop chords, and cancel pending offers on pause.
 
 Automated browser checks: preview distinction, persistent pause/preferences,
 mandatory pairing comparison, keyboard arrangement overlap errors, hidden

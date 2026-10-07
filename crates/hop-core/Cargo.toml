@@ -18,6 +18,7 @@ mdns-sd = "0.13"
 directories = "6"
 uuid = { version = "1", features = ["v4", "serde"] }
 zeroize = { version = "1", features = ["derive"] }
+arc-swap = "1"
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 arboard = "3.6"

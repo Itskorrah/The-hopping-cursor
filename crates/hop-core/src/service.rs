@@ -6,6 +6,7 @@ use crate::{
     topology,
 };
 use anyhow::{Context, Result};
+use arc_swap::ArcSwap;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -43,6 +44,20 @@ struct RoutingConfig {
     peers: BTreeMap<String, bool>,
     hop_keys: Vec<HopKey>,
 }
+impl From<&Config> for RoutingConfig {
+    fn from(c: &Config) -> Self {
+        Self {
+            settings: c.settings.clone(),
+            layout: c.layout.clone(),
+            peers: c
+                .peers
+                .iter()
+                .map(|(id, p)| (id.clone(), p.allow_input))
+                .collect(),
+            hop_keys: c.hop_keys.clone(),
+        }
+    }
+}
 #[derive(Clone)]
 struct Active {
     peer: String,
@@ -62,6 +77,7 @@ struct Channel {
 pub struct Service {
     pub(crate) identity: Identity,
     pub(crate) config: Mutex<Config>,
+    routing: ArcSwap<RoutingConfig>,
     pub(crate) config_dir: PathBuf,
     pub(crate) state: Mutex<State>,
     pub(crate) backend: Arc<dyn Platform>,
@@ -131,6 +147,7 @@ impl Service {
         );
         let this = Arc::new(Self {
             identity,
+            routing: ArcSwap::from_pointee(RoutingConfig::from(&config)),
             config: Mutex::new(config),
             config_dir: dir,
             state: Mutex::new(State {
@@ -240,6 +257,7 @@ impl Service {
         next.settings = settings;
         config::save(&self.config_dir, &next)?;
         *c = next;
+        self.update_routing(&c);
         self.state.lock().unwrap().local.name = c.settings.device_name.clone();
         drop(c);
         if should_release {
@@ -273,6 +291,7 @@ impl Service {
         next.layout = layout;
         config::save(&self.config_dir, &next)?;
         *c = next;
+        self.update_routing(&c);
         drop(c);
         self.release();
         Ok(())
@@ -309,6 +328,7 @@ impl Service {
         );
         config::save(&self.config_dir, &next)?;
         *c = next;
+        self.update_routing(&c);
         drop(c);
         self.state
             .lock()
@@ -356,10 +376,11 @@ impl Service {
         }
         config::save(&self.config_dir, &next)?;
         *c = next;
+        self.update_routing(&c);
         Ok(())
     }
     pub fn jump_to_display(&self, device_id: &str, display_id: &str) -> Result<()> {
-        let c = self.config.lock().unwrap().clone();
+        let c = self.routing.load();
         anyhow::ensure!(
             !c.settings.paused,
             "Resume sharing before jumping to a display"
@@ -377,7 +398,7 @@ impl Service {
             } else {
                 anyhow::ensure!(
                     s.peers.get(device_id).is_some_and(|p| p.connected)
-                        && c.peers.get(device_id).is_some_and(|p| p.allow_input),
+                        && c.peers.get(device_id).is_some_and(|p| *p),
                     "Computer is offline or input sharing is disabled"
                 );
                 s.peers
@@ -449,6 +470,7 @@ impl Service {
             .insert(name.trim().into(), next.layout.clone());
         config::save(&self.config_dir, &next)?;
         *c = next;
+        self.update_routing(&c);
         Ok(())
     }
     pub fn load_profile(&self, name: &str) -> Result<()> {
@@ -471,6 +493,7 @@ impl Service {
         );
         config::save(&self.config_dir, &next)?;
         *c = next;
+        self.update_routing(&c);
         Ok(())
     }
     pub fn peer_permissions(
@@ -488,6 +511,7 @@ impl Service {
         p.allow_files = files;
         config::save(&self.config_dir, &next)?;
         *c = next;
+        self.update_routing(&c);
         drop(c);
         self.release();
         if !files {
@@ -505,6 +529,7 @@ impl Service {
         next.hop_keys.retain(|d| d.device_id != id);
         config::save(&self.config_dir, &next)?;
         *c = next;
+        self.update_routing(&c);
         drop(c);
         self.channels.lock().unwrap().remove(id);
         if let Some(p) = self.state.lock().unwrap().peers.get_mut(id) {
@@ -557,6 +582,10 @@ impl Service {
         } else {
             Ok(false)
         }
+    }
+    fn update_routing(&self, config: &Config) {
+        // Native hooks must never wait for configuration serialization/fsync.
+        self.routing.store(Arc::new(RoutingConfig::from(config)));
     }
     pub(crate) async fn open(
         self: &Arc<Self>,
@@ -703,6 +732,7 @@ impl Service {
             }
             config::save(&self.config_dir, &next)?;
             *c = next;
+            self.update_routing(&c);
         }
         Ok((id, reader, writer))
     }
@@ -830,6 +860,7 @@ impl Service {
                 }
                 config::save(&self.config_dir, &next)?;
                 *c = next;
+                self.update_routing(&c);
             }
             self.start_control(id, reader, writer);
         } else {
@@ -889,7 +920,7 @@ impl Service {
                 _=stop.changed()=>break,
                 message=urgent.recv()=>match message{Some(m)=>{tokio::time::timeout(Duration::from_millis(750),writer.send(&m)).await.context("Emergency writer stalled")??;},None=>break},
                 _=heartbeat.tick()=>{
-                    anyhow::ensure!(s.config.lock().unwrap().peers.contains_key(&id),"Computer was unpaired");
+                    anyhow::ensure!(s.routing.load().peers.contains_key(&id),"Computer was unpaired");
                     anyhow::ensure!(last_received.elapsed()<Duration::from_millis(1500),"Heartbeat expired; released input");
                     tokio::time::timeout(Duration::from_millis(750),writer.send(&Message::Ping(start.elapsed().as_micros() as u64))).await.context("Control writer stalled")??;
                 },
@@ -945,8 +976,8 @@ impl Service {
     }
     fn receive_control(&self, id: &str, message: Message) -> Result<()> {
         let allowed = {
-            let c = self.config.lock().unwrap();
-            c.peers.get(id).is_some_and(|p| p.allow_input) && !c.settings.paused
+            let c = self.routing.load();
+            c.peers.get(id).is_some_and(|p| *p) && !c.settings.paused
         };
         match message {
             Message::Enter { display_id, x, y } => {
@@ -1014,19 +1045,7 @@ impl Service {
         Ok(())
     }
     pub fn capture(&self, event: CapturedEvent) -> bool {
-        let c = {
-            let c = self.config.lock().unwrap();
-            RoutingConfig {
-                settings: c.settings.clone(),
-                layout: c.layout.clone(),
-                peers: c
-                    .peers
-                    .iter()
-                    .map(|(id, p)| (id.clone(), p.allow_input))
-                    .collect(),
-                hop_keys: c.hop_keys.clone(),
-            }
-        };
+        let c = self.routing.load();
         let mut s = self.state.lock().unwrap();
         if let CapturedEvent::Input(InputEvent::Key { code, down }) = &event {
             if *down {
@@ -1323,7 +1342,7 @@ impl Service {
         }
     }
     fn forward_physical_to(&self, id: &str) {
-        let enabled = self.config.lock().unwrap().settings.map_modifiers;
+        let enabled = self.routing.load().settings.map_modifiers;
         let (source, target) = {
             let s = self.state.lock().unwrap();
             (
@@ -1473,6 +1492,34 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
+    async fn native_capture_does_not_wait_for_configuration_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::start(dir.path().into(), Some(0), Arc::new(Headless::default()))
+            .await
+            .unwrap();
+        let config_write = service.config.lock().unwrap();
+        let (done, result) = std::sync::mpsc::channel();
+        let source = service.clone();
+        let hook = std::thread::spawn(move || {
+            done.send(source.capture(CapturedEvent::Move {
+                x: 100.,
+                y: 100.,
+                dx: 1.,
+                dy: 0.,
+            }))
+            .unwrap();
+        });
+        let completed = result.recv_timeout(Duration::from_millis(500));
+        drop(config_write);
+        hook.join().unwrap();
+        service.shutdown();
+        assert!(
+            matches!(completed, Ok(false)),
+            "Native hooks must remain responsive while configuration is locked"
+        );
+    }
+
+    #[tokio::test]
     async fn emergency_release_bypasses_saturated_input_and_invalidates_stale_keys() {
         let dir = tempfile::tempdir().unwrap();
         let service = Service::start(dir.path().into(), Some(0), Arc::new(Headless::default()))
@@ -1561,6 +1608,7 @@ mod tests {
                     allow_files: false,
                 },
             );
+            source.update_routing(&c);
             source.state.lock().unwrap().peers.insert(
                 target.identity.id.clone(),
                 PeerStatus {

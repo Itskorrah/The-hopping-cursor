@@ -15,10 +15,13 @@ runners. Its core formatting check exposed a post-edit formatting issue,
 corrected before the final update; final CI is recorded through the repository
 Actions history.
 
-Local validation: 26 Rust tests, strict Clippy, formatting, TypeScript/Vite build,
+Local validation: 27 Rust tests, strict Clippy, formatting, TypeScript/Vite build,
 and all 10 Playwright browser tests passed. Security regressions include
 tampering/replay, fragmented reads under outbound traffic, and full-queue input
-recovery. Dependency audits found no listed vulnerability entries; upstream
+recovery. Native callbacks use published routing snapshots without waiting for
+disk configuration writes; a dedicated regression holds that lock during
+capture. Encryption buffers are reused. A separate-process CLI smoke test
+delivered and verified a 256 KiB file. Dependency audits found no listed vulnerability entries; upstream
 maintenance/GLib warnings are documented in docs/SECURITY.md.
 
 Important intentional differences: no account/cloud membership; explicit

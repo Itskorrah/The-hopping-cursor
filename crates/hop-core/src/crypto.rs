@@ -11,6 +11,7 @@ use tokio::{
         TcpStream,
     },
 };
+use zeroize::Zeroizing;
 
 pub const MAX_FRAME: usize = 65535;
 pub const CHUNK_SIZE: usize = 32 * 1024;
@@ -23,17 +24,26 @@ pub struct SecureConnection {
 pub struct SecureReader {
     io: OwnedReadHalf,
     noise: Arc<Mutex<snow::TransportState>>,
+    ciphertext: Vec<u8>,
+    plain: Zeroizing<Vec<u8>>,
 }
 pub struct SecureWriter {
     io: OwnedWriteHalf,
     noise: Arc<Mutex<snow::TransportState>>,
+    plain: Zeroizing<Vec<u8>>,
+    ciphertext: Vec<u8>,
 }
 async fn read_frame<R: AsyncRead + Unpin>(r: &mut R) -> Result<Vec<u8>> {
+    let mut b = Vec::new();
+    read_frame_into(r, &mut b).await?;
+    Ok(b)
+}
+async fn read_frame_into<R: AsyncRead + Unpin>(r: &mut R, b: &mut Vec<u8>) -> Result<()> {
     let n = r.read_u16().await? as usize;
     anyhow::ensure!(n > 0, "Empty frame");
-    let mut b = vec![0; n];
-    r.read_exact(&mut b).await?;
-    Ok(b)
+    b.resize(n, 0);
+    r.read_exact(b).await?;
+    Ok(())
 }
 async fn write_frame<W: AsyncWrite + Unpin>(w: &mut W, b: &[u8]) -> Result<()> {
     anyhow::ensure!(!b.is_empty() && b.len() <= MAX_FRAME, "Frame too large");
@@ -94,34 +104,38 @@ impl SecureConnection {
             SecureReader {
                 io: r,
                 noise: noise.clone(),
+                ciphertext: Vec::with_capacity(MAX_FRAME),
+                plain: Zeroizing::new(vec![0; MAX_FRAME]),
             },
-            SecureWriter { io: w, noise },
+            SecureWriter {
+                io: w,
+                noise,
+                plain: Zeroizing::new(vec![0; MAX_FRAME - 16]),
+                ciphertext: vec![0; MAX_FRAME],
+            },
         )
     }
 }
 impl SecureReader {
     pub async fn recv(&mut self) -> Result<Message> {
-        let ciphertext = read_frame(&mut self.io).await?;
-        let mut plain = vec![0; MAX_FRAME];
+        read_frame_into(&mut self.io, &mut self.ciphertext).await?;
         let n = self
             .noise
             .lock()
             .map_err(|_| anyhow::anyhow!("Cipher lock poisoned"))?
-            .read_message(&ciphertext, &mut plain)?;
-        decode_plain(&plain[..n])
+            .read_message(&self.ciphertext, &mut self.plain)?;
+        decode_plain(&self.plain[..n])
     }
 }
 impl SecureWriter {
     pub async fn send(&mut self, message: &Message) -> Result<()> {
-        let mut buffer = vec![0; MAX_FRAME - 16];
-        let plain = postcard::to_slice(message, &mut buffer)?;
-        let mut ciphertext = vec![0; MAX_FRAME];
+        let plain = postcard::to_slice(message, &mut self.plain)?;
         let n = self
             .noise
             .lock()
             .map_err(|_| anyhow::anyhow!("Cipher lock poisoned"))?
-            .write_message(plain, &mut ciphertext)?;
-        write_frame(&mut self.io, &ciphertext[..n]).await
+            .write_message(plain, &mut self.ciphertext)?;
+        write_frame(&mut self.io, &self.ciphertext[..n]).await
     }
 }
 

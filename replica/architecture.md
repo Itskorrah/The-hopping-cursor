@@ -21,7 +21,10 @@ Each connection has a bounded encrypted frame size and a Postcard message
 codec that rejects trailing data. Input uses a dedicated control connection
 (TCP_NODELAY), bounded queues and heartbeat watchdogs. A separate reader task
 preserves partial frame reads across outbound traffic. Emergency Leave/release
-messages bypass the normal queue and invalidate stale queued input. Bulk
+messages bypass the normal queue and invalidate stale queued input. Native
+callbacks read an immutable routing snapshot instead of acquiring the disk
+configuration lock. Session encryption buffers are reused and plaintext buffers
+are zeroized when dropped. Bulk
 clipboard/file traffic uses independent authenticated Noise connections to
 avoid holding up input. This does not remove TCP head-of-line blocking caused
 by packet loss within a control connection; QUIC is a future experiment.
