@@ -614,7 +614,7 @@ impl Service {
         {
             let mut s = self.state.lock().unwrap();
             let previous = s.peers.get(&id);
-            let addr = remembered;
+            let addr = if purpose=="data" {previous.map(|p|p.address.clone()).unwrap_or(remembered)} else {remembered};
             let connected = previous.is_some_and(|p| p.connected);
             let latency_ms = previous.and_then(|p| p.latency_ms);
             s.peers.insert(
@@ -1183,7 +1183,7 @@ impl Service {
                     Ok(mdns_sd::ServiceEvent::ServiceResolved(info))=>{
                         let Some(id)=info.get_property_val_str("id")else{continue;};if id==s.identity.id||id.len()!=32{continue;}
                         let Some(ip)=info.get_addresses().iter().find(|a|a.is_ipv4()&&local_ip(**a))else{continue;};let address=SocketAddr::new(*ip,info.get_port()).to_string();
-                        let trusted=s.config.lock().unwrap().peers.contains_key(id);let mut st=s.state.lock().unwrap();if let Some(p)=st.peers.get_mut(id){p.address=address;}else{
+                        let trusted=s.config.lock().unwrap().peers.contains_key(id);let mut st=s.state.lock().unwrap();if st.peers.len()>=64&&!st.peers.contains_key(id){continue;}if let Some(p)=st.peers.get_mut(id){p.address=address;}else{
                             st.peers.insert(id.into(),PeerStatus{device:Device{id:id.into(),name:info.get_property_val_str("name").unwrap_or("Nearby computer").chars().take(64).collect(),platform:info.get_property_val_str("platform").unwrap_or("unknown").chars().take(32).collect(),displays:vec![]},address,public_key:None,safety_code:None,trusted,connected:false,latency_ms:None,last_error:None});
                         }
                     },Ok(_)=>{},Err(_)=>break,

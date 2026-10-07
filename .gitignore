@@ -10,3 +10,5 @@ playwright-report/
 .idea/
 *.part
 .local/
+*.tsbuildinfo
+apps/desktop/src-tauri/gen/

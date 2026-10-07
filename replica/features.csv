@@ -1,0 +1,28 @@
+feature,area,priority,original,clone,notes
+Encrypted transport,security,must,yes,yes,Noise XX frames; integration tested; external audit pending
+Explicit authenticated pairing,security,must,yes,yes,Compare full code and approve both sides; pinning and revocation tested
+Automatic discovery,network,must,yes,yes,mDNS plus manual private IP; physical isolated-network testing pending
+Reconnect and recovery,network,must,yes,yes,Heartbeat watchdog; integration recovery and held keys tested
+Edge cursor hopping,input,must,yes,partial,Native adapters and routing implemented; physical Windows/Mac tests pending
+Keyboard sharing and modifier mapping,input,must,yes,partial,HID mapping implemented; OS behavior and international layouts need hardware tests
+Multiple display arrangement,layout,must,yes,partial,Offset stacked and hidden topology tested; mixed DPI OS behavior pending
+Clipboard text,clipboard,must,yes,partial,Real encrypted exchange tested with memory adapter; OS pasteboard tests pending
+Clipboard images and formatting,clipboard,should,yes,partial,PNG/HTML adapters compile; cross-app OS tests pending
+File transfers with progress,files,must,yes,yes,Encrypted streaming acceptance SHA-256 quotas and non-overwrite tested
+Native edge file drag,files,must,yes,no,App-window drag/drop works; Explorer/Finder cross-edge dragging not implemented
+Clipboard files,files,should,yes,no,Native file pasteboard bridge pending
+Cursor lock,input,should,yes,partial,Edge-blocking toggle; native usage needs testing
+Game mode,input,should,yes,partial,Edge-blocking only; raw relative gaming input pending
+Hide displays,layout,should,yes,partial,Hidden displays excluded from routing; native held drags need validation
+Layout profiles,layout,should,yes,yes,Persistent named profiles and desktop controls
+Per-device permissions,security,should,yes,yes,Input clipboard and file permission controls
+Monitor hop shortcuts,input,should,yes,no,Planned configurable per-display bindings
+Idle display dimming,power,should,yes,no,Hardware brightness adapter pending
+Lock wake session synchronization,power,should,yes,no,OS notifications and privileged integrations pending
+Secure desktop control,input,could,yes,no,Windows service privilege work pending
+Commercial lifetime licensing,business,could,yes,skip,User-owned local alpha; commercial licensing deferred
+Signed installers,distribution,should,partial,no,Unsigned native CI packages; certificates not configured
+Windows and macOS builds,distribution,must,yes,partial,Engine target checks passed; full native installer build workflow pending
+Linux input,input,could,no,skip,Linux headless protocol tests only
+Privacy-preserving diagnostics,diagnostics,should,yes,yes,No keys or content in exports; real RTT labelled accurately
+Consent by default,security,should,no,yes,Incoming files require approval unless deliberately disabled

@@ -290,7 +290,7 @@ impl Service {
             } else {
                 let (tx, rx) = oneshot::channel();
                 self.decisions.lock().unwrap().insert(id.clone(), tx);
-                tokio::select! {_=stop.changed()=>false,r=tokio::time::timeout(Duration::from_secs(60),rx)=>matches!(r,Ok(Ok(true)))}
+                tokio::select! {_=stop.changed()=>false,r=tokio::time::timeout(Duration::from_secs(60),rx)=>matches!(r,Ok(Ok(true))),_=reader.recv()=>false}
             };
             self.decisions.lock().unwrap().remove(&id);
             if !accepted {
