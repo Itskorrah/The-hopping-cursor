@@ -446,3 +446,38 @@ async fn pausing_sender_cancels_pending_offers_and_blocks_new_files() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn restart_restores_known_computers_and_file_send_without_rediscovery() {
+    let p = pair(true).await;
+    let target = p.b.snapshot();
+    p.a.shutdown();
+    let restarted = Service::start(p._a.path().into(), Some(0), Arc::new(Headless::default()))
+        .await
+        .unwrap();
+    let saved = restarted
+        .snapshot()
+        .peers
+        .into_iter()
+        .find(|peer| peer.device.id == target.local.id)
+        .unwrap();
+    assert!(saved.trusted);
+    assert_eq!(saved.device.name, target.local.name);
+    assert_eq!(
+        saved.public_key.as_deref(),
+        Some(target.public_key.as_str())
+    );
+    let path = p._a.path().join("after-restart.txt");
+    tokio::fs::write(&path, b"remembered address")
+        .await
+        .unwrap();
+    let result = restarted.send_file(&target.local.id, path).await;
+    restarted.shutdown();
+    result.unwrap();
+    assert_eq!(
+        tokio::fs::read(p._b.path().join("received/after-restart.txt"))
+            .await
+            .unwrap(),
+        b"remembered address"
+    );
+}

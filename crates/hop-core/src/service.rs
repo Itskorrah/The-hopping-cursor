@@ -145,6 +145,34 @@ impl Service {
             primary.bounds.x + primary.bounds.width / 2.,
             primary.bounds.y + primary.bounds.height / 2.,
         );
+        let peers = config
+            .peers
+            .iter()
+            .map(|(id, peer)| {
+                let safety_code = hex::decode(&peer.public_key)
+                    .ok()
+                    .filter(|key| key.len() == 32 && config::device_id(key) == *id)
+                    .map(|key| config::safety_code(&identity.public, &key));
+                (
+                    id.clone(),
+                    PeerStatus {
+                        device: Device {
+                            id: id.clone(),
+                            name: peer.name.clone(),
+                            platform: "unknown".into(),
+                            displays: vec![],
+                        },
+                        address: peer.address.clone().unwrap_or_default(),
+                        public_key: Some(peer.public_key.clone()),
+                        safety_code,
+                        trusted: true,
+                        connected: false,
+                        latency_ms: None,
+                        last_error: None,
+                    },
+                )
+            })
+            .collect();
         let this = Arc::new(Self {
             identity,
             routing: ArcSwap::from_pointee(RoutingConfig::from(&config)),
@@ -152,7 +180,7 @@ impl Service {
             config_dir: dir,
             state: Mutex::new(State {
                 local,
-                peers: BTreeMap::new(),
+                peers,
                 transfers: BTreeMap::new(),
                 diagnostics: vec![],
                 active: None,

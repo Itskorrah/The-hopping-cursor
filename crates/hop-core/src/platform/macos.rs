@@ -43,7 +43,6 @@ extern "C" {
     fn CGEventTapEnable(tap: Ref, enable: bool);
     fn CGEventGetLocation(event: Ref) -> Point;
     fn CGEventGetIntegerValueField(event: Ref, field: u32) -> i64;
-    fn CGEventGetDoubleValueField(event: Ref, field: u32) -> f64;
     fn CGEventSetIntegerValueField(event: Ref, field: u32, value: i64);
     fn CGEventGetFlags(event: Ref) -> u64;
     fn CGEventSetFlags(event: Ref, flags: u64);
@@ -93,8 +92,8 @@ extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
                 Some(CapturedEvent::Move {
                     x: p.x,
                     y: p.y,
-                    dx: CGEventGetDoubleValueField(event, 4),
-                    dy: CGEventGetDoubleValueField(event, 5),
+                    dx: CGEventGetIntegerValueField(event, 4) as f64,
+                    dy: CGEventGetIntegerValueField(event, 5) as f64,
                 })
             }
             1 | 2 | 3 | 4 | 25 | 26 => Some(CapturedEvent::Input(InputEvent::Button {
@@ -106,8 +105,8 @@ extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
                 down: matches!(kind, 1 | 3 | 25),
             })),
             22 => Some(CapturedEvent::Input(InputEvent::Scroll {
-                x: CGEventGetDoubleValueField(event, 12),
-                y: CGEventGetDoubleValueField(event, 11),
+                x: CGEventGetIntegerValueField(event, 12) as f64,
+                y: CGEventGetIntegerValueField(event, 11) as f64,
             })),
             10 | 11 => keys::mac_to_hid(CGEventGetIntegerValueField(event, 9) as u16).map(|code| {
                 CapturedEvent::Input(InputEvent::Key {

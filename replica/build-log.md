@@ -15,7 +15,7 @@ runners. Its core formatting check exposed a post-edit formatting issue,
 corrected before the final update; final CI is recorded through the repository
 Actions history.
 
-Local validation: 27 Rust tests, strict Clippy, formatting, TypeScript/Vite build,
+Local validation: 28 Rust tests, strict Clippy, formatting, TypeScript/Vite build,
 and all 10 Playwright browser tests passed. Security regressions include
 tampering/replay, fragmented reads under outbound traffic, and full-queue input
 recovery. Native callbacks use published routing snapshots without waiting for

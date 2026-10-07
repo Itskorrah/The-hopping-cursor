@@ -151,12 +151,19 @@ impl Service {
         self.decisions.lock().unwrap().remove(id);
     }
     fn peer_address(&self, id: &str) -> Result<String> {
-        let s = self.state.lock().unwrap();
-        s.peers
+        let c = self.config.lock().unwrap();
+        let trusted = c.peers.get(id).context("Pair this computer first")?;
+        let address = self
+            .state
+            .lock()
+            .unwrap()
+            .peers
             .get(id)
-            .filter(|p| p.trusted)
-            .map(|p| p.address.clone())
-            .context("Pair and connect this computer first")
+            .filter(|p| p.trusted && !p.address.is_empty())
+            .map(|p| p.address.clone());
+        address
+            .or_else(|| trusted.address.clone())
+            .context("Connect to this computer's local address first")
     }
     pub async fn send_file(self: &Arc<Self>, peer: &str, path: PathBuf) -> Result<()> {
         self.outgoing_allowed(peer, false)?;
