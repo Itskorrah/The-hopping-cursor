@@ -1,0 +1,31 @@
+{
+  "name": "@hopping-cursor/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 1420 --strictPort",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "tauri": "tauri",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/plugin-dialog": "^2.2.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "lucide-react": "^0.468.0",
+    "@fontsource/dm-sans": "^5.2.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "@playwright/test": "^1.52.0",
+    "@axe-core/playwright": "^4.10.2"
+  }
+}

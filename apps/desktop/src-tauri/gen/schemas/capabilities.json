@@ -1,0 +1,1 @@
+{"desktop":{"identifier":"desktop","description":"Local desktop interface and file selection","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open","dialog:allow-save"]}}
