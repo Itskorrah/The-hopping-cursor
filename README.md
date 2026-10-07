@@ -111,4 +111,4 @@ docs/                       Security model and physical-platform test checklist
 
 The Replica pack was installed from [your repository](https://github.com/Itskorrah/replica-skill-universal). Additional skill discovery used [Vercel find-skills](https://skills.sh/vercel-labs/skills/find-skills); details are in [replica/skills.md](replica/skills.md).
 
-Original application code is MIT licensed. Installed skills preserve their own licenses; dependencies and fonts retain their respective licenses. The name is provisional; trademark/domain checks have not been performed.
+Original application code is MIT licensed. Installed skills preserve their own licenses; dependencies and fonts retain their respective licenses. [Bundled notices](apps/desktop/public/THIRD_PARTY_NOTICES.txt) accompany installer artifacts and the app assets. Regenerate with `python3 scripts/generate-notices.py` after changing dependencies. The name is provisional; trademark/domain checks have not been performed.
