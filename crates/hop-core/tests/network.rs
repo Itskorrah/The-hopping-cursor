@@ -293,3 +293,156 @@ async fn enforces_receiver_file_limit() {
     assert!(p.a.send_file(&p.b.snapshot().local.id, path).await.is_err());
     assert!(!p._b.path().join("received/too-big.txt").exists());
 }
+
+#[tokio::test]
+async fn profiles_persist_and_restore_valid_arrangements() {
+    let p = pair(true).await;
+    let original = p.a.snapshot().layout;
+    p.a.save_profile("Home desk").unwrap();
+    let mut changed = original.clone();
+    for d in &mut changed {
+        d.rect.y += 200.0;
+    }
+    p.a.set_layout(changed).unwrap();
+    p.a.load_profile("Home desk").unwrap();
+    assert_eq!(p.a.snapshot().layout, original);
+    assert!(config::load(p._a.path())
+        .unwrap()
+        .profiles
+        .contains_key("Home desk"));
+    p.a.delete_profile("Home desk").unwrap();
+    assert!(p.a.load_profile("Home desk").is_err());
+}
+
+#[tokio::test]
+async fn sender_can_cancel_while_waiting_for_consent() {
+    let p = pair(false).await;
+    let path = p._a.path().join("cancel.txt");
+    tokio::fs::write(&path, b"not delivered").await.unwrap();
+    let a = p.a.clone();
+    let peer = p.b.snapshot().local.id;
+    let task = tokio::spawn(async move { a.send_file(&peer, path).await });
+    wait(|| {
+        p.a.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.state == "awaiting_acceptance")
+            && p.b
+                .snapshot()
+                .transfers
+                .iter()
+                .any(|t| t.state == "offered")
+    })
+    .await;
+    let id = p.a.snapshot().transfers[0].id.clone();
+    p.a.cancel_transfer(&id).unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_err());
+    wait(|| p.b.snapshot().transfers[0].state != "offered").await;
+    assert!(!p._b.path().join("received/cancel.txt").exists());
+    assert_eq!(p.a.snapshot().transfers[0].state, "cancelled");
+}
+
+#[tokio::test]
+async fn per_peer_permissions_block_input_and_file_sending() {
+    let p = pair(true).await;
+    let peer = p.b.snapshot().local.id;
+    p.a.peer_permissions(&peer, false, false, false).unwrap();
+    assert!(!p.a.capture(CapturedEvent::Move {
+        x: 1919.,
+        y: 500.,
+        dx: 4.,
+        dy: 0.
+    }));
+    let path = p._a.path().join("blocked.txt");
+    tokio::fs::write(&path, b"blocked").await.unwrap();
+    assert!(p.a.send_file(&peer, path).await.is_err());
+    assert!(!p.a.snapshot().peer_permissions[&peer].input);
+}
+
+#[tokio::test]
+async fn hop_shortcuts_change_focus_without_typing_the_chord() {
+    let p = pair(true).await;
+    let b = p.b.snapshot();
+    let a = p.a.snapshot();
+    p.a.set_hop_key(hop_core::HopKey {
+        device_id: b.local.id.clone(),
+        display_id: b.local.displays[0].id.clone(),
+        keys: vec![224, 226, 30],
+    })
+    .unwrap();
+    assert!(p
+        .a
+        .set_hop_key(hop_core::HopKey {
+            device_id: a.local.id,
+            display_id: a.local.displays[0].id.clone(),
+            keys: vec![224, 226, 30]
+        })
+        .is_err());
+    p.a.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 224,
+        down: true,
+    }));
+    p.a.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 226,
+        down: true,
+    }));
+    assert!(p.a.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 30,
+        down: true
+    })));
+    assert_eq!(p.a.snapshot().active_device, b.local.id);
+    wait(|| !p.pb.events.lock().unwrap().is_empty()).await;
+    assert!(!p
+        .pb
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|e| matches!(e, InputEvent::Key { down: true, .. })));
+    for code in [30, 226, 224] {
+        assert!(p
+            .a
+            .capture(CapturedEvent::Input(InputEvent::Key { code, down: false })));
+    }
+    p.a.release();
+}
+
+#[tokio::test]
+async fn pausing_sender_cancels_pending_offers_and_blocks_new_files() {
+    let p = pair(false).await;
+    let path = p._a.path().join("pause.txt");
+    tokio::fs::write(&path, b"must not arrive").await.unwrap();
+    let a = p.a.clone();
+    let peer = p.b.snapshot().local.id;
+    let outgoing_peer = peer.clone();
+    let outgoing_path = path.clone();
+    let task = tokio::spawn(async move { a.send_file(&outgoing_peer, outgoing_path).await });
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.state == "offered")
+    })
+    .await;
+    let mut settings = p.a.snapshot().settings;
+    settings.paused = true;
+    p.a.settings(settings).unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_err());
+    assert!(p.a.send_file(&peer, path).await.is_err());
+    assert!(!p._b.path().join("received/pause.txt").exists());
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .all(|t| t.state != "offered")
+    })
+    .await;
+}

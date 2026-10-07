@@ -83,6 +83,7 @@ const sample: Snapshot = {
     },
   ],
   profiles: [],
+  hop_keys: [],
   peer_permissions: {
     "pc-preview": { input: true, clipboard: true, files: true },
   },
@@ -108,6 +109,7 @@ try {
   preview = structuredClone(sample);
 }
 preview.profiles ??= [];
+preview.hop_keys ??= [];
 preview.peer_permissions ??= {};
 let previewProfiles: Record<string, LayoutDisplay[]> = {};
 try {
@@ -166,6 +168,23 @@ export async function call<T = void>(
       }
       break;
     }
+    case "set_hop_key": {
+      const binding = {
+        device_id: String(args.deviceId),
+        display_id: String(args.displayId),
+        keys: args.keys as number[],
+      };
+      preview.hop_keys = preview.hop_keys.filter(
+        (b) =>
+          b.device_id !== binding.device_id ||
+          b.display_id !== binding.display_id,
+      );
+      if (binding.keys.length) preview.hop_keys.push(binding);
+      break;
+    }
+    case "jump_to_display":
+      preview.active_device = String(args.deviceId);
+      break;
     case "peer_permissions":
       preview.peer_permissions[String(args.id)] = {
         input: !!args.input,

@@ -16,13 +16,12 @@ Game mode,input,should,yes,partial,Edge-blocking only; raw relative gaming input
 Hide displays,layout,should,yes,partial,Hidden displays excluded from routing; native held drags need validation
 Layout profiles,layout,should,yes,yes,Persistent named profiles and desktop controls
 Per-device permissions,security,should,yes,yes,Input clipboard and file permission controls
-Monitor hop shortcuts,input,should,yes,no,Planned configurable per-display bindings
+Monitor hop shortcuts,input,should,yes,partial,Persistent physical-key chords and per-monitor desktop controls; protocol and UI tested; native hardware pending
 Idle display dimming,power,should,yes,no,Hardware brightness adapter pending
 Lock wake session synchronization,power,should,yes,no,OS notifications and privileged integrations pending
 Secure desktop control,input,could,yes,no,Windows service privilege work pending
 Commercial lifetime licensing,business,could,yes,skip,User-owned local alpha; commercial licensing deferred
 Signed installers,distribution,should,partial,no,Unsigned native CI packages; certificates not configured
-Windows and macOS builds,distribution,must,yes,partial,Engine target checks passed; full native installer build workflow pending
-Linux input,input,could,no,skip,Linux headless protocol tests only
+Windows and macOS builds,distribution,must,yes,yes,Windows x64 NSIS and Intel/Apple Silicon DMG builds succeeded on native CI runners
 Privacy-preserving diagnostics,diagnostics,should,yes,yes,No keys or content in exports; real RTT labelled accurately
 Consent by default,security,should,no,yes,Incoming files require approval unless deliberately disabled

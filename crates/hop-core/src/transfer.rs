@@ -48,6 +48,39 @@ impl Drop for PartialFile {
     }
 }
 impl Service {
+    pub(crate) fn cancel_peer_files(&self, peer: Option<&str>) {
+        let ids: Vec<_> = self
+            .state
+            .lock()
+            .unwrap()
+            .transfers
+            .values()
+            .filter(|t| {
+                peer.is_none_or(|p| t.peer_id == p)
+                    && matches!(
+                        t.state.as_str(),
+                        "hashing" | "offered" | "awaiting_acceptance" | "transferring"
+                    )
+            })
+            .map(|t| t.id.clone())
+            .collect();
+        for id in ids {
+            let _ = self.cancel_transfer(&id);
+        }
+    }
+    fn outgoing_allowed(&self, peer: &str, clipboard: bool) -> Result<()> {
+        let c = self.config.lock().unwrap();
+        anyhow::ensure!(
+            !c.settings.paused
+                && c.peers.get(peer).is_some_and(|p| if clipboard {
+                    p.allow_clipboard
+                } else {
+                    p.allow_files
+                }),
+            "Sharing is paused or disabled for this computer"
+        );
+        Ok(())
+    }
     async fn wait_cancel(&self, id: &str) {
         loop {
             if self.cancelled.lock().unwrap().contains(id) {
@@ -126,14 +159,7 @@ impl Service {
             .context("Pair and connect this computer first")
     }
     pub async fn send_file(self: &Arc<Self>, peer: &str, path: PathBuf) -> Result<()> {
-        let allowed = self
-            .config
-            .lock()
-            .unwrap()
-            .peers
-            .get(peer)
-            .is_some_and(|p| p.allow_files);
-        anyhow::ensure!(allowed, "File sharing disabled for this computer");
+        self.outgoing_allowed(peer, false)?;
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
@@ -164,13 +190,13 @@ impl Service {
             saved_path: None,
         });
         let result:Result<()>=async{
-            let mut hash=Sha256::new();let mut buffer=vec![0;CHUNK_SIZE];let mut stop=self.stop.subscribe();loop{anyhow::ensure!(!self.cancelled.lock().unwrap().contains(&id)&&!*stop.borrow(),"Transfer cancelled");let n=file.read(&mut buffer).await?;if n==0{break;}hash.update(&buffer[..n]);}
-            file.rewind().await?;let hash=hex::encode(hash.finalize());
+            let mut hash=Sha256::new();let mut buffer=vec![0;CHUNK_SIZE];let mut hashed=0u64;let mut stop=self.stop.subscribe();loop{anyhow::ensure!(!self.cancelled.lock().unwrap().contains(&id)&&!*stop.borrow(),"Transfer cancelled");let n=file.read(&mut buffer).await?;if n==0{break;}hashed+=n as u64;anyhow::ensure!(hashed<=size,"Source file changed during hashing");hash.update(&buffer[..n]);}anyhow::ensure!(hashed==size,"Source file changed during hashing");
+            file.rewind().await?;let hash=hex::encode(hash.finalize());self.outgoing_allowed(peer,false)?;
             let address=self.peer_address(peer)?;let(actual,mut reader,mut writer)=self.open(&address,"data").await?;anyhow::ensure!(actual==peer,"The address belongs to a different computer");
             writer.send(&Message::BlobStart{id:id.clone(),kind:BlobKind::File,name,size,hash}).await?;self.progress(&id,0,"awaiting_acceptance");
             let response=tokio::select!{_=stop.changed()=>anyhow::bail!("Application stopped"),_=self.wait_cancel(&id)=>anyhow::bail!("Transfer cancelled"),r=tokio::time::timeout(Duration::from_secs(65),reader.recv())=>r.context("File offer expired")??};
             anyhow::ensure!(matches!(response,Message::BlobAccept{id:ref got,accepted:true}if got==&id),"Recipient declined or file sharing is disabled");
-            let mut offset=0;loop{anyhow::ensure!(!self.cancelled.lock().unwrap().contains(&id)&&!*stop.borrow(),"Transfer cancelled");let n=file.read(&mut buffer).await?;if n==0{break;}anyhow::ensure!(offset+n as u64<=size,"Source file changed during transfer");
+            let mut offset=0;loop{anyhow::ensure!(!self.cancelled.lock().unwrap().contains(&id)&&!*stop.borrow(),"Transfer cancelled");self.outgoing_allowed(peer,false)?;let n=file.read(&mut buffer).await?;if n==0{break;}anyhow::ensure!(offset+n as u64<=size,"Source file changed during transfer");
                 tokio::time::timeout(Duration::from_secs(20),writer.send(&Message::BlobChunk{id:id.clone(),offset,data:buffer[..n].to_vec()})).await.context("Transfer stalled")??;offset+=n as u64;self.progress(&id,offset,"transferring");}
             anyhow::ensure!(offset==size,"Source file changed during transfer");writer.send(&Message::BlobEnd{id:id.clone()}).await?;
             let result=tokio::time::timeout(Duration::from_secs(20),reader.recv()).await.context("No transfer confirmation")??;
@@ -180,6 +206,7 @@ impl Service {
         result
     }
     pub(crate) async fn send_clipboard(self: &Arc<Self>, peer: &str, data: Vec<u8>) -> Result<()> {
+        self.outgoing_allowed(peer, true)?;
         anyhow::ensure!(
             data.len() as u64 <= CLIPBOARD_LIMIT,
             "Clipboard exceeds 8 MiB limit"
@@ -204,6 +231,7 @@ impl Service {
         );
         let mut stop = self.stop.subscribe();
         for (offset, chunk) in data.chunks(CHUNK_SIZE).enumerate() {
+            self.outgoing_allowed(peer, true)?;
             anyhow::ensure!(!*stop.borrow(), "Application stopped");
             let message = Message::BlobChunk {
                 id: id.clone(),
@@ -325,6 +353,7 @@ impl Service {
                 }
             }
             anyhow::ensure!(hex::encode(digest.finalize())==hash,"Integrity verification failed; file was not saved");
+            {let c=self.config.lock().unwrap();anyhow::ensure!(!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files}else{p.allow_clipboard}),"Sharing permission revoked before publication");}
             if let Some(mut p)=partial {
                 let file=p.file.take().unwrap();file.sync_all().await?;drop(file);let dir=p.path.parent().unwrap();let mut destination=None;
                 for n in 0..10000 {let candidate=dir.join(if n==0{name.clone()}else{let path=Path::new(&name);let stem=path.file_stem().and_then(|v|v.to_str()).unwrap_or("file");let ext=path.extension().and_then(|v|v.to_str());match ext{Some(ext)=>format!("{stem} ({n}).{ext}"),None=>format!("{stem} ({n})")}});

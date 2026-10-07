@@ -18,6 +18,9 @@ pub trait Platform: Send + Sync {
     fn stop_capture(&self);
     fn inject(&self, event: &InputEvent) -> Result<()>;
     fn read_clipboard(&self) -> Result<Vec<ClipboardPart>>;
+    fn clipboard_revision(&self) -> Option<u64> {
+        None
+    }
     fn write_clipboard(&self, parts: &[ClipboardPart]) -> Result<()>;
 }
 pub fn native() -> Arc<dyn Platform> {

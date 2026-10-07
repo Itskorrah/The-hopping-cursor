@@ -13,12 +13,16 @@ with a different key fail closed. Revocation is checked while transferring and
 on control heartbeats. Initial metadata advertisements expose device name,
 platform, address, and identifier on the LAN.
 
-Input uses a separate bounded control queue; file and clipboard data use fresh
+Input uses a separate bounded control queue and an independent reader task;
+frame reads cannot be interrupted by outgoing traffic. Emergency release
+bypasses a full queue and invalidates older queued input. File and clipboard data use fresh
 authenticated sessions. Frames are at most 65,535 bytes, transfer chunks at most
 32 KiB. The control watchdog releases ownership after roughly 1.5 seconds of
 missing traffic, subject to OS scheduling. A stalled write has a shorter timeout.
 Ctrl+Alt+Escape forces local recovery independently of network delivery. The
-receiver releases its own synthetic keys when a connection closes.
+receiver releases its own synthetic keys when a connection closes. Pause
+and file-permission revocation cancel active/pending file offers; permissions
+are rechecked during streaming and before publication.
 
 Incoming data is restricted to explicit message types. Only the current
 controller may inject input. Coordinates must fit an actual display, input
@@ -44,7 +48,23 @@ application does not claim to protect a compromised endpoint. Diagnostic exports
 exclude identity keys and content. Diagnostic messages can include device names
 and connection addresses: review before sharing them.
 
-Native adapters have been cross-compiled but require actual OS/hardware testing.
+Native Windows and Intel/Apple Silicon Mac installers have built on GitHub's
+native runners, but still require actual OS/hardware testing.
 There has been no external cryptographic audit, fuzz campaign, signing, or
 notarization. Use a private test LAN for initial validation. Report vulnerabilities
 privately to the repository owner rather than publishing sensitive exploit data.
+
+## Dependency audit — 2026-10-07
+
+`npm audit` reports zero vulnerabilities, including development dependencies.
+`cargo audit` reports zero vulnerability entries. Bincode was replaced with
+Postcard after its maintenance advisory; maximum serialized frame size is
+enforced during encoding, and trailing/malformed messages are rejected.
+
+Cargo still reports upstream maintenance/unsoundness warnings in the desktop
+dependency graph: `fxhash` (RUSTSEC-2025-0057), `proc-macro-error`
+(RUSTSEC-2024-0370), and GLib's `VariantStrIter` (RUSTSEC-2024-0429). GLib is part
+of Tauri's Linux GTK stack; this application currently distributes only Windows
+and macOS desktop packages. These warnings are recorded rather than globally
+suppressed. Track upstream Tauri/GTK migrations before adding Linux desktop
+support. A dependency scan does not constitute an application security audit.

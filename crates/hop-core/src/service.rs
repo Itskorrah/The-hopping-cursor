@@ -11,7 +11,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, Instant},
 };
 use tokio::{
@@ -27,10 +30,18 @@ pub(crate) struct State {
     active: Option<Active>,
     inbound: Option<String>,
     pressed: BTreeSet<u16>,
+    consumed: BTreeSet<u16>,
+    local_position: (f64, f64),
     edge: Option<(String, Instant)>,
     buttons: BTreeSet<u8>,
     last_motion: (f64, f64),
     pub clipboard_hash: Vec<u8>,
+}
+struct RoutingConfig {
+    settings: Settings,
+    layout: Vec<LayoutDisplay>,
+    peers: BTreeMap<String, bool>,
+    hop_keys: Vec<HopKey>,
 }
 #[derive(Clone)]
 struct Active {
@@ -44,7 +55,9 @@ struct Active {
 #[derive(Clone)]
 struct Channel {
     generation: String,
-    tx: mpsc::Sender<Message>,
+    tx: mpsc::Sender<(u64, Message)>,
+    priority: mpsc::UnboundedSender<Message>,
+    epoch: Arc<AtomicU64>,
 }
 pub struct Service {
     pub(crate) identity: Identity,
@@ -107,6 +120,15 @@ impl Service {
         }
         config::save(&dir, &config)?;
         let (stop, _) = watch::channel(false);
+        let primary = local
+            .displays
+            .iter()
+            .find(|d| d.primary)
+            .unwrap_or(&local.displays[0]);
+        let initial_position = (
+            primary.bounds.x + primary.bounds.width / 2.,
+            primary.bounds.y + primary.bounds.height / 2.,
+        );
         let this = Arc::new(Self {
             identity,
             config: Mutex::new(config),
@@ -119,6 +141,8 @@ impl Service {
                 active: None,
                 inbound: None,
                 pressed: BTreeSet::new(),
+                consumed: BTreeSet::new(),
+                local_position: initial_position,
                 edge: None,
                 buttons: BTreeSet::new(),
                 last_motion: (0., 0.),
@@ -167,6 +191,7 @@ impl Service {
             peers: s.peers.values().cloned().collect(),
             layout: c.layout.clone(),
             profiles: c.profiles.keys().cloned().collect(),
+            hop_keys: c.hop_keys.clone(),
             peer_permissions: c
                 .peers
                 .iter()
@@ -187,7 +212,6 @@ impl Service {
                 .active
                 .as_ref()
                 .map(|a| a.peer.clone())
-                .or_else(|| s.inbound.clone())
                 .unwrap_or_else(|| s.local.id.clone()),
             listening_port: self.listening_port,
             diagnostics: s.diagnostics.clone(),
@@ -220,6 +244,7 @@ impl Service {
         drop(c);
         if should_release {
             self.release();
+            self.cancel_peer_files(None);
         }
         Ok(())
     }
@@ -295,6 +320,117 @@ impl Service {
         self.note(format!("Approved computer {}", pending.device.name));
         Ok(())
     }
+    pub fn set_hop_key(&self, mut binding: HopKey) -> Result<()> {
+        binding.keys.sort_unstable();
+        binding.keys.dedup();
+        anyhow::ensure!(
+            binding.keys.is_empty()
+                || (binding.keys.len() >= 2
+                    && binding.keys.len() <= 4
+                    && binding.keys.iter().all(|k| (4..=231).contains(k))
+                    && binding.keys.iter().any(|k| *k >= 224)),
+            "Use a shortcut with 2–4 keys including a modifier"
+        );
+        anyhow::ensure!(
+            !binding.keys.contains(&41),
+            "Escape is reserved for emergency recovery"
+        );
+        let mut c = self.config.lock().unwrap();
+        anyhow::ensure!(
+            c.layout
+                .iter()
+                .any(|d| d.device_id == binding.device_id && d.display_id == binding.display_id),
+            "Unknown display"
+        );
+        anyhow::ensure!(
+            binding.keys.is_empty()
+                || !c.hop_keys.iter().any(|b| b.keys == binding.keys
+                    && (b.device_id != binding.device_id || b.display_id != binding.display_id)),
+            "This shortcut is already assigned to another display"
+        );
+        let mut next = c.clone();
+        next.hop_keys
+            .retain(|b| b.device_id != binding.device_id || b.display_id != binding.display_id);
+        if !binding.keys.is_empty() {
+            next.hop_keys.push(binding);
+        }
+        config::save(&self.config_dir, &next)?;
+        *c = next;
+        Ok(())
+    }
+    pub fn jump_to_display(&self, device_id: &str, display_id: &str) -> Result<()> {
+        let c = self.config.lock().unwrap().clone();
+        anyhow::ensure!(
+            !c.settings.paused,
+            "Resume sharing before jumping to a display"
+        );
+        let placement = c
+            .layout
+            .iter()
+            .find(|d| d.device_id == device_id && d.display_id == display_id && !d.hidden)
+            .context("Display is hidden or unavailable")?
+            .clone();
+        let (local, native, return_position) = {
+            let s = self.state.lock().unwrap();
+            let native = if device_id == s.local.id {
+                s.local.displays.iter().find(|d| d.id == display_id)
+            } else {
+                anyhow::ensure!(
+                    s.peers.get(device_id).is_some_and(|p| p.connected)
+                        && c.peers.get(device_id).is_some_and(|p| p.allow_input),
+                    "Computer is offline or input sharing is disabled"
+                );
+                s.peers
+                    .get(device_id)
+                    .and_then(|p| p.device.displays.iter().find(|d| d.id == display_id))
+            };
+            (
+                s.local.clone(),
+                native.context("Physical display unavailable")?.clone(),
+                s.local_position,
+            )
+        };
+        self.release();
+        let x = placement.rect.x + placement.rect.width / 2.;
+        let y = placement.rect.y + placement.rect.height / 2.;
+        let (nx, ny) = topology::to_native(&placement.rect, &native.bounds, x, y);
+        if device_id == local.id {
+            self.backend.inject(&InputEvent::Move { x: nx, y: ny })?;
+            self.restore_physical();
+            return Ok(());
+        }
+        let park = local
+            .displays
+            .iter()
+            .find(|d| d.bounds.contains(return_position.0, return_position.1))
+            .unwrap_or(&local.displays[0]);
+        self.backend.inject(&InputEvent::Move {
+            x: park.bounds.x + park.bounds.width / 2.,
+            y: park.bounds.y + park.bounds.height / 2.,
+        })?;
+        self.release_physical_on_source();
+        self.state.lock().unwrap().active = Some(Active {
+            peer: device_id.into(),
+            display: display_id.into(),
+            x,
+            y,
+            return_x: return_position.0,
+            return_y: return_position.1,
+        });
+        if !self.send(
+            device_id,
+            Message::Enter {
+                display_id: display_id.into(),
+                x: nx,
+                y: ny,
+            },
+        ) {
+            self.release();
+            anyhow::bail!("Input queue unavailable; returned input locally");
+        }
+        self.forward_physical_to(device_id);
+        Ok(())
+    }
     pub fn save_profile(&self, name: &str) -> Result<()> {
         anyhow::ensure!(
             !name.trim().is_empty()
@@ -354,14 +490,19 @@ impl Service {
         *c = next;
         drop(c);
         self.release();
+        if !files {
+            self.cancel_peer_files(Some(id));
+        }
         Ok(())
     }
     pub fn forget_peer(&self, id: &str) -> Result<()> {
         self.release();
+        self.cancel_peer_files(Some(id));
         let mut c = self.config.lock().unwrap();
         let mut next = c.clone();
         next.peers.remove(id);
         next.layout.retain(|d| d.device_id != id);
+        next.hop_keys.retain(|d| d.device_id != id);
         config::save(&self.config_dir, &next)?;
         *c = next;
         drop(c);
@@ -380,7 +521,6 @@ impl Service {
         };
         let active_was_remote = active.is_some();
         if let Some(a) = active {
-            self.send(&a.peer, Message::Input(InputEvent::ReleaseAll));
             self.send(&a.peer, Message::Leave);
             let _ = self.backend.inject(&InputEvent::Move {
                 x: a.return_x,
@@ -486,16 +626,24 @@ impl Service {
                 && port > 1024
                 && device.id == id
                 && device.name.len() <= 256
+                && device.platform.len() <= 32
                 && device.displays.len() <= 32
                 && device.displays.iter().all(|d| d.bounds.valid()
+                    && !d.id.is_empty()
                     && d.id.len() < 256
+                    && d.name.len() <= 256
                     && d.scale.is_finite()
-                    && d.scale > 0.),
+                    && d.scale > 0.
+                    && d.scale <= 16.),
             "Invalid peer introduction"
         );
         anyhow::ensure!(remote_purpose == purpose, "Connection purpose mismatch");
         {
             let mut s = self.state.lock().unwrap();
+            anyhow::ensure!(
+                s.peers.len() < 64 || s.peers.contains_key(&id),
+                "Too many nearby computers; restart to clear stale candidates"
+            );
             let previous = s.peers.get(&id);
             let connected = previous.is_some_and(|p| p.connected);
             let latency_ms = previous.and_then(|p| p.latency_ms);
@@ -586,14 +734,19 @@ impl Service {
         };
         anyhow::ensure!(
             version == 1
+                && port > 1024
                 && device.id == id
                 && id != self.identity.id
                 && device.name.len() <= 256
+                && device.platform.len() <= 32
                 && device.displays.len() <= 32
                 && device.displays.iter().all(|d| d.bounds.valid()
+                    && !d.id.is_empty()
                     && d.id.len() < 256
+                    && d.name.len() <= 256
                     && d.scale.is_finite()
-                    && d.scale > 0.),
+                    && d.scale > 0.
+                    && d.scale <= 16.),
             "Invalid peer identity/display list"
         );
         anyhow::ensure!(
@@ -613,8 +766,16 @@ impl Service {
         let remembered = SocketAddr::new(address.ip(), port).to_string();
         {
             let mut s = self.state.lock().unwrap();
+            anyhow::ensure!(
+                s.peers.len() < 64 || s.peers.contains_key(&id),
+                "Too many nearby computers; restart to clear stale candidates"
+            );
             let previous = s.peers.get(&id);
-            let addr = if purpose=="data" {previous.map(|p|p.address.clone()).unwrap_or(remembered)} else {remembered};
+            let addr = if purpose == "data" {
+                previous.map(|p| p.address.clone()).unwrap_or(remembered)
+            } else {
+                remembered
+            };
             let connected = previous.is_some_and(|p| p.connected);
             let latency_ms = previous.and_then(|p| p.latency_ms);
             s.peers.insert(
@@ -683,6 +844,8 @@ impl Service {
         mut writer: SecureWriter,
     ) {
         let (tx, mut rx) = mpsc::channel(512);
+        let (priority, mut urgent) = mpsc::unbounded_channel();
+        let epoch = Arc::new(AtomicU64::new(0));
         let generation = uuid::Uuid::new_v4().to_string();
         {
             let mut channels = self.channels.lock().unwrap();
@@ -694,6 +857,8 @@ impl Service {
                 Channel {
                     generation: generation.clone(),
                     tx,
+                    priority,
+                    epoch: epoch.clone(),
                 },
             );
         }
@@ -703,26 +868,41 @@ impl Service {
         }
         let s = self.clone();
         tokio::spawn(async move {
+            // Frame reads cannot be cancelled midway by a heartbeat or outbound
+            // input. Keep the reader alive across control-loop select branches.
+            let (incoming_tx, mut incoming) = mpsc::channel(64);
+            let reader_task = tokio::spawn(async move {
+                loop {
+                    let message = reader.recv().await;
+                    let failed = message.is_err();
+                    if incoming_tx.send(message).await.is_err() || failed {
+                        break;
+                    }
+                }
+            });
             let mut stop = s.stop.subscribe();
             let start = Instant::now();
             let mut last_received = Instant::now();
             let mut heartbeat = tokio::time::interval(Duration::from_millis(300));
             let result:Result<()>=async{loop{tokio::select!{
+                biased;
                 _=stop.changed()=>break,
+                message=urgent.recv()=>match message{Some(m)=>{tokio::time::timeout(Duration::from_millis(750),writer.send(&m)).await.context("Emergency writer stalled")??;},None=>break},
                 _=heartbeat.tick()=>{
                     anyhow::ensure!(s.config.lock().unwrap().peers.contains_key(&id),"Computer was unpaired");
                     anyhow::ensure!(last_received.elapsed()<Duration::from_millis(1500),"Heartbeat expired; released input");
                     tokio::time::timeout(Duration::from_millis(750),writer.send(&Message::Ping(start.elapsed().as_micros() as u64))).await.context("Control writer stalled")??;
                 },
-                message=rx.recv()=>match message{Some(m)=>{tokio::time::timeout(Duration::from_millis(750),writer.send(&m)).await.context("Input writer stalled")??;},None=>break},
-                message=reader.recv()=>{
-                    let message=message?;last_received=Instant::now();match message{
-                        Message::Ping(n)=>writer.send(&Message::Pong(n)).await?,
+                message=incoming.recv()=>{
+                    let message=message.context("Control reader closed")??;last_received=Instant::now();match message{
+                        Message::Ping(n)=>tokio::time::timeout(Duration::from_millis(750),writer.send(&Message::Pong(n))).await.context("Heartbeat writer stalled")??,
                         Message::Pong(n)=>{let elapsed=start.elapsed().as_micros() as u64;anyhow::ensure!(n<=elapsed,"Invalid ping response");if let Some(p)=s.state.lock().unwrap().peers.get_mut(&id){p.latency_ms=Some((elapsed-n) as f64/1000.);}},
                         other=>s.receive_control(&id,other)?,
                     }
-                }
+                },
+                message=rx.recv()=>match message{Some((sent_epoch,m))=>{if sent_epoch!=epoch.load(Ordering::SeqCst){continue;}tokio::time::timeout(Duration::from_millis(750),writer.send(&m)).await.context("Input writer stalled")??;},None=>break},
             }}Ok(())}.await;
+            reader_task.abort();
             {
                 let mut channels = s.channels.lock().unwrap();
                 if channels
@@ -750,11 +930,18 @@ impl Service {
         });
     }
     fn send(&self, id: &str, message: Message) -> bool {
-        self.channels
-            .lock()
-            .unwrap()
-            .get(id)
-            .is_some_and(|c| c.tx.try_send(message).is_ok())
+        self.channels.lock().unwrap().get(id).is_some_and(|c| {
+            if matches!(
+                message,
+                Message::Leave | Message::Input(InputEvent::ReleaseAll)
+            ) {
+                c.epoch.fetch_add(1, Ordering::SeqCst);
+                c.priority.send(message).is_ok()
+            } else {
+                c.tx.try_send((c.epoch.load(Ordering::SeqCst), message))
+                    .is_ok()
+            }
+        })
     }
     fn receive_control(&self, id: &str, message: Message) -> Result<()> {
         let allowed = {
@@ -827,7 +1014,19 @@ impl Service {
         Ok(())
     }
     pub fn capture(&self, event: CapturedEvent) -> bool {
-        let c = self.config.lock().unwrap().clone();
+        let c = {
+            let c = self.config.lock().unwrap();
+            RoutingConfig {
+                settings: c.settings.clone(),
+                layout: c.layout.clone(),
+                peers: c
+                    .peers
+                    .iter()
+                    .map(|(id, p)| (id.clone(), p.allow_input))
+                    .collect(),
+                hop_keys: c.hop_keys.clone(),
+            }
+        };
         let mut s = self.state.lock().unwrap();
         if let CapturedEvent::Input(InputEvent::Key { code, down }) = &event {
             if *down {
@@ -843,6 +1042,35 @@ impl Service {
                 drop(s);
                 self.release();
                 return true;
+            }
+            if s.consumed.contains(code) {
+                if !down {
+                    s.consumed.remove(code);
+                }
+                return true;
+            }
+            if *down && !c.settings.paused {
+                if let Some(binding) = c
+                    .hop_keys
+                    .iter()
+                    .find(|b| b.keys.iter().all(|k| s.pressed.contains(k)))
+                    .cloned()
+                {
+                    for k in &binding.keys {
+                        s.consumed.insert(*k);
+                    }
+                    drop(s);
+                    for code in &binding.keys {
+                        let _ = self.backend.inject(&InputEvent::Key {
+                            code: *code,
+                            down: false,
+                        });
+                    }
+                    if let Err(e) = self.jump_to_display(&binding.device_id, &binding.display_id) {
+                        self.note(format!("Hop shortcut: {e}"));
+                    }
+                    return true;
+                }
             }
         }
         if let CapturedEvent::Input(InputEvent::Button { button, down }) = &event {
@@ -911,6 +1139,7 @@ impl Service {
                     };
                     let (cx, cy) = display.bounds.clamp(x, y);
                     let (wx, wy) = topology::to_workspace(&from.rect, &display.bounds, cx, cy);
+                    s.local_position = (cx, cy);
                     (from.clone(), wx, wy, cx, cy)
                 };
                 let next = if c.settings.cursor_locked || c.settings.game_mode {
@@ -921,7 +1150,7 @@ impl Service {
                 if let Some(next) = next {
                     let online = next.device_id == s.local.id
                         || s.peers.get(&next.device_id).is_some_and(|p| p.connected)
-                            && c.peers.get(&next.device_id).is_some_and(|p| p.allow_input);
+                            && c.peers.get(&next.device_id).is_some_and(|p| *p);
                     if online {
                         let edge_id = format!("{}:{}", next.device_id, next.display_id);
                         if s.edge.as_ref().is_none_or(|(id, _)| id != &edge_id) {
@@ -955,7 +1184,6 @@ impl Service {
                                 if next.device_id == s.local.id {
                                     drop(s);
                                     if let Some(a) = old {
-                                        self.send(&a.peer, Message::Input(InputEvent::ReleaseAll));
                                         self.send(&a.peer, Message::Leave);
                                     }
                                     let _ = self.backend.inject(&InputEvent::Move { x: px, y: py });
@@ -984,7 +1212,6 @@ impl Service {
                                 drop(s);
                                 let old_was_local = old.is_none();
                                 if let Some(a) = old {
-                                    self.send(&a.peer, Message::Input(InputEvent::ReleaseAll));
                                     self.send(&a.peer, Message::Leave);
                                 }
                                 if old_was_local {
@@ -1067,7 +1294,7 @@ impl Service {
             s.pressed
                 .iter()
                 .copied()
-                .filter(|k| *k != 57 && *k != 41)
+                .filter(|k| *k != 57 && *k != 41 && !s.consumed.contains(k))
                 .collect(),
             s.buttons.iter().copied().collect(),
         )
@@ -1183,7 +1410,8 @@ impl Service {
                     Ok(mdns_sd::ServiceEvent::ServiceResolved(info))=>{
                         let Some(id)=info.get_property_val_str("id")else{continue;};if id==s.identity.id||id.len()!=32{continue;}
                         let Some(ip)=info.get_addresses().iter().find(|a|a.is_ipv4()&&local_ip(**a))else{continue;};let address=SocketAddr::new(*ip,info.get_port()).to_string();
-                        let trusted=s.config.lock().unwrap().peers.contains_key(id);let mut st=s.state.lock().unwrap();if st.peers.len()>=64&&!st.peers.contains_key(id){continue;}if let Some(p)=st.peers.get_mut(id){p.address=address;}else{
+                        let trusted=s.config.lock().unwrap().peers.contains_key(id);let mut st=s.state.lock().unwrap();if st.peers.len()>=64&&!st.peers.contains_key(id){continue;}
+                        if let Some(p)=st.peers.get_mut(id){p.address=address;}else{
                             st.peers.insert(id.into(),PeerStatus{device:Device{id:id.into(),name:info.get_property_val_str("name").unwrap_or("Nearby computer").chars().take(64).collect(),platform:info.get_property_val_str("platform").unwrap_or("unknown").chars().take(32).collect(),displays:vec![]},address,public_key:None,safety_code:None,trusted,connected:false,latency_ms:None,last_error:None});
                         }
                     },Ok(_)=>{},Err(_)=>break,
@@ -1196,11 +1424,13 @@ impl Service {
         let s = self.clone();
         tokio::spawn(async move {
             let mut stop = s.stop.subscribe();
+            let mut last_revision = None;
             let mut tick = tokio::time::interval(Duration::from_millis(700));
             loop {
                 tokio::select! {_=stop.changed()=>break,_=tick.tick()=>{
                     let settings=s.config.lock().unwrap().settings.clone();if settings.paused||!(settings.clipboard_text||settings.clipboard_html||settings.clipboard_images){continue;}
-                    let backend=s.backend.clone();let parts=match tokio::task::spawn_blocking(move||backend.read_clipboard()).await{Ok(Ok(p))=>filter_clipboard(p,&settings),_=>continue};if parts.is_empty(){continue;}
+                    let revision=s.backend.clipboard_revision().map(|n|(n,settings.clipboard_text,settings.clipboard_html,settings.clipboard_images));if revision.is_some()&&revision==last_revision{continue;}
+                    let backend=s.backend.clone();let parts=match tokio::task::spawn_blocking(move||backend.read_clipboard()).await{Ok(Ok(p))=>filter_clipboard(p,&settings),_=>continue};last_revision=revision;if parts.is_empty(){continue;}
                     let Ok(data)=serde_json::to_vec(&parts)else{continue;};if data.len()>8*1024*1024{continue;}let hash=Sha256::digest(&data).to_vec();
                     let changed={let mut st=s.state.lock().unwrap();if st.clipboard_hash==hash{false}else{st.clipboard_hash=hash;true}};if !changed{continue;}
                     let peers={let c=s.config.lock().unwrap();let st=s.state.lock().unwrap();st.peers.iter().filter(|(id,p)|p.connected&&c.peers.get(*id).is_some_and(|p|p.allow_clipboard)).map(|(id,_)|id.clone()).collect::<Vec<_>>()};
@@ -1233,5 +1463,196 @@ pub(crate) fn local_ip(ip: IpAddr) -> bool {
                 || (ip.segments()[0] & 0xffc0) == 0xfe80
                 || ip.to_ipv4_mapped().is_some_and(|a| local_ip(IpAddr::V4(a)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::Headless;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn emergency_release_bypasses_saturated_input_and_invalidates_stale_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::start(dir.path().into(), Some(0), Arc::new(Headless::default()))
+            .await
+            .unwrap();
+        let (tx, mut normal) = mpsc::channel(1);
+        let (priority, mut urgent) = mpsc::unbounded_channel();
+        let epoch = Arc::new(AtomicU64::new(0));
+        service.channels.lock().unwrap().insert(
+            "test-peer".into(),
+            Channel {
+                generation: "test".into(),
+                tx,
+                priority,
+                epoch: epoch.clone(),
+            },
+        );
+        assert!(service.send(
+            "test-peer",
+            Message::Input(InputEvent::Key {
+                code: 4,
+                down: true
+            })
+        ));
+        assert!(!service.send(
+            "test-peer",
+            Message::Input(InputEvent::Key {
+                code: 5,
+                down: true
+            })
+        ));
+        assert!(service.send("test-peer", Message::Leave));
+        assert!(matches!(urgent.recv().await, Some(Message::Leave)));
+        let (queued_epoch, _) = normal.recv().await.unwrap();
+        assert_ne!(
+            queued_epoch,
+            epoch.load(Ordering::SeqCst),
+            "Queued key-down must be discarded after recovery"
+        );
+        service.shutdown();
+    }
+
+    async fn fragment(
+        mut from: tokio::net::tcp::OwnedReadHalf,
+        mut to: tokio::net::tcp::OwnedWriteHalf,
+    ) {
+        let mut buffer = [0u8; 1024];
+        while let Ok(n) = from.read(&mut buffer).await {
+            if n == 0 {
+                break;
+            }
+            for (index, byte) in buffer[..n].iter().enumerate() {
+                if to.write_all(&[*byte]).await.is_err() {
+                    return;
+                }
+                if index == 0 {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                } else {
+                    tokio::task::yield_now().await;
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn fragmented_reads_survive_outbound_input_and_heartbeats() {
+        let da = tempfile::tempdir().unwrap();
+        let db = tempfile::tempdir().unwrap();
+        let backend_b = Arc::new(Headless::default());
+        let a = Service::start(da.path().into(), Some(0), Arc::new(Headless::default()))
+            .await
+            .unwrap();
+        let b = Service::start(db.path().into(), Some(0), backend_b.clone())
+            .await
+            .unwrap();
+        for (source, target) in [(&a, &b), (&b, &a)] {
+            let mut c = source.config.lock().unwrap();
+            c.peers.insert(
+                target.identity.id.clone(),
+                TrustedPeer {
+                    public_key: hex::encode(&target.identity.public),
+                    name: "test".into(),
+                    address: None,
+                    allow_input: true,
+                    allow_clipboard: false,
+                    allow_files: false,
+                },
+            );
+            source.state.lock().unwrap().peers.insert(
+                target.identity.id.clone(),
+                PeerStatus {
+                    device: target.snapshot().local,
+                    address: "127.0.0.1:1".into(),
+                    public_key: Some(hex::encode(&target.identity.public)),
+                    safety_code: None,
+                    trusted: true,
+                    connected: false,
+                    latency_ms: None,
+                    last_error: None,
+                },
+            );
+        }
+        let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = proxy.local_addr().unwrap();
+        let upstream_address = server.local_addr().unwrap();
+        let relay = tokio::spawn(async move {
+            let (downstream, _) = proxy.accept().await.unwrap();
+            let upstream = TcpStream::connect(upstream_address).await.unwrap();
+            let (dr, dw) = downstream.into_split();
+            let (ur, uw) = upstream.into_split();
+            tokio::join!(fragment(dr, uw), fragment(ur, dw));
+        });
+        let a_stream = TcpStream::connect(address).await.unwrap();
+        let (b_stream, _) = server.accept().await.unwrap();
+        let (ca, cb) = tokio::join!(
+            SecureConnection::handshake(a_stream, &a.identity, true),
+            SecureConnection::handshake(b_stream, &b.identity, false)
+        );
+        let (ar, aw) = ca.unwrap().split();
+        let (br, bw) = cb.unwrap().split();
+        a.start_control(b.identity.id.clone(), ar, aw);
+        b.start_control(a.identity.id.clone(), br, bw);
+        assert!(a.send(
+            &b.identity.id,
+            Message::Enter {
+                display_id: "headless-main".into(),
+                x: 500.,
+                y: 500.
+            }
+        ));
+        for n in 0..24 {
+            assert!(a.send(
+                &b.identity.id,
+                Message::Input(InputEvent::Key {
+                    code: 4,
+                    down: n % 2 == 0
+                })
+            ));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(
+            a.snapshot()
+                .peers
+                .iter()
+                .any(|p| p.device.id == b.identity.id && p.connected),
+            "{:?}",
+            a.snapshot().diagnostics
+        );
+        assert!(
+            b.snapshot()
+                .peers
+                .iter()
+                .any(|p| p.device.id == a.identity.id && p.connected),
+            "{:?}",
+            b.snapshot().diagnostics
+        );
+        assert!(backend_b.events.lock().unwrap().iter().any(|e| matches!(
+            e,
+            InputEvent::Key {
+                code: 4,
+                down: true
+            }
+        )));
+        let start = Instant::now();
+        let before_release = backend_b.events.lock().unwrap().len();
+        assert!(a.send(&b.identity.id, Message::Leave));
+        loop {
+            if backend_b.events.lock().unwrap()[before_release..].contains(&InputEvent::ReleaseAll)
+            {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(2),
+                "Remote held keys were not released"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        a.shutdown();
+        b.shutdown();
+        relay.abort();
     }
 }

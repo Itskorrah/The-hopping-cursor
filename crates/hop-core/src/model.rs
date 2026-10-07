@@ -53,6 +53,12 @@ pub struct LayoutDisplay {
     pub hidden: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HopKey {
+    pub device_id: String,
+    pub display_id: String,
+    pub keys: Vec<u16>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub device_name: String,
@@ -157,6 +163,7 @@ pub struct Snapshot {
     pub peers: Vec<PeerStatus>,
     pub layout: Vec<LayoutDisplay>,
     pub profiles: Vec<String>,
+    pub hop_keys: Vec<HopKey>,
     pub peer_permissions: BTreeMap<String, PeerPermissions>,
     pub transfers: Vec<TransferStatus>,
     pub permissions: Permissions,

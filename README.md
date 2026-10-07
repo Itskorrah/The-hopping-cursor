@@ -2,18 +2,20 @@
 
 A desktop application for sharing a mouse, keyboard, clipboard, and files between your own computers on a local network. A Rust engine, native Windows and macOS input adapters, and a Tauri/React control interface. Independently implemented from public product research; no proprietary code or assets used.
 
-**Status: development alpha.** The encrypted core runs and has integration tests. Native adapters pass cross-target compile checks. Actual Windows/macOS input and permission behavior still require the hardware checklist below. This is not yet a production replacement for a mature software KVM.
+**Status: development alpha.** The encrypted engine and desktop controls are implemented. Windows x64 and Intel/Apple Silicon Mac installers have built successfully on native GitHub runners. Automated tests use an in-memory OS adapter; actual Windows/macOS input and permission behavior still require the hardware checklist below. This is not yet a production replacement for a mature software KVM.
+
+![Workspace interface preview with sample computers](docs/images/workspace.png)
 
 ## What's built
 
 - Noise XX encryption, persistent identities, matching safety codes, explicit approval on both computers, pinned keys, and revocation. No cloud account.
 - mDNS discovery, manual private-IP connection, remembered addresses, reconnection, heartbeat RTT, and input recovery on disconnect.
-- Edge-based cursor routing with offset/stacked displays, coordinate scaling, hidden displays, configurable edge delay, and sensitivity.
+- Edge-based cursor routing with offset/stacked displays, coordinate scaling, hidden displays, configurable edge delay, sensitivity, and per-monitor hop shortcuts.
 - Windows hooks/SendInput and macOS CGEventTap/CGEventPost adapters; keyboard forwarding, common physical-key mapping, mouse buttons/scroll, injected-event filtering, held-key handoff, and Ctrl+Alt+Escape emergency recovery.
 - Plain text, HTML, and PNG clipboard exchange on separate encrypted bulk connections, type controls, per-peer permissions, and bounce suppression.
 - Streamed file transfers, app-window drag/drop, recipient approval, progress, cancellation, SHA-256 verification, duplicate-name protection, and quotas.
 - Desktop pairing, draggable/keyboard-accessible layout editor, saved layout profiles, computer management, transfers, preferences, diagnostics, and tray controls. Cursor lock and basic edge-blocking game mode.
-- Windows NSIS and Intel/Apple Silicon macOS DMG build workflow in GitHub Actions. Installers are unsigned development builds; build success is not evidence of physical two-computer validation.
+- Windows NSIS and Intel/Apple Silicon macOS DMG installers and build workflow in GitHub Actions. Installers are unsigned development builds; build success is not evidence of physical two-computer validation.
 
 ## What's still missing
 
@@ -39,6 +41,8 @@ On macOS, grant **Accessibility**, **Input Monitoring**, and **Local Network** a
 3. Arrange your displays with touching edges and save. Each computer currently keeps its own layout; configure both if you want to drive from either side.
 4. Move toward a shared edge. Your keyboard follows the cursor. Use **Ctrl+Alt+Escape** on the source computer to bring input back immediately.
 5. Send files from File transfers or drop them into the app window. The receiver accepts the offer. Completed files go to the receiving folder in Preferences.
+
+Select a monitor to assign **Ctrl+Alt+1–9** hop shortcuts or use **Jump here**. Save named layout profiles for different desks. Pair permissions separately control input, clipboard, and files. **Pause** returns input locally, stops sharing, and cancels pending/active file transfers.
 
 Closing the window keeps the engine in the tray. **Quit** from the tray stops sharing and releases input. Restart after connecting/disconnecting displays in this first version. Default networking is TCP **24810**, mDNS UDP **5353**. No port forwarding is needed. Guest Wi-Fi/client isolation may block peers.
 
@@ -88,7 +92,9 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-Core integration tests start real encrypted TCP services and exercise pairing, revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, and emergency/disconnect recovery with an in-memory OS adapter. Browser tests cover preferences, pairing consent, arrangement, accessibility, and small-screen layout. Neither substitutes for testing real native hooks, OS pasteboards, or multiple physical computers.
+The current suite has **26 Rust tests and 10 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. Neither substitutes for testing real native hooks, OS pasteboards, or multiple physical computers.
+
+Dependency audit results and remaining warnings are recorded in [docs/SECURITY.md](docs/SECURITY.md). The prioritized path from this alpha to a release is in [docs/ROADMAP.md](docs/ROADMAP.md); the research feature matrix is in [replica/features.csv](replica/features.csv).
 
 ## Project map
 

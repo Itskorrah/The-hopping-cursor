@@ -68,6 +68,7 @@ export interface Snapshot {
   peers: Peer[];
   layout: LayoutDisplay[];
   profiles: string[];
+  hop_keys: { device_id: string; display_id: string; keys: number[] }[];
   peer_permissions: Record<
     string,
     { input: boolean; clipboard: boolean; files: boolean }

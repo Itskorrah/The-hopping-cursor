@@ -305,6 +305,12 @@ impl Platform for Windows {
     fn read_clipboard(&self) -> Result<Vec<ClipboardPart>> {
         super::clipboard::read()
     }
+    fn clipboard_revision(&self) -> Option<u64> {
+        Some(
+            unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() }
+                as u64,
+        )
+    }
     fn write_clipboard(&self, p: &[ClipboardPart]) -> Result<()> {
         super::clipboard::write(p)
     }

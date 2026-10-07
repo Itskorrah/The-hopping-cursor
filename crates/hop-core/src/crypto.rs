@@ -3,7 +3,6 @@ use crate::{
     model::Message,
 };
 use anyhow::{Context, Result};
-use bincode::Options;
 use std::sync::{Arc, Mutex};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -109,25 +108,130 @@ impl SecureReader {
             .lock()
             .map_err(|_| anyhow::anyhow!("Cipher lock poisoned"))?
             .read_message(&ciphertext, &mut plain)?;
-        Ok(bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_limit(MAX_FRAME as u64)
-            .reject_trailing_bytes()
-            .deserialize(&plain[..n])?)
+        decode_plain(&plain[..n])
     }
 }
 impl SecureWriter {
     pub async fn send(&mut self, message: &Message) -> Result<()> {
-        let plain = bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_limit((MAX_FRAME - 16) as u64)
-            .serialize(message)?;
+        let mut buffer = vec![0; MAX_FRAME - 16];
+        let plain = postcard::to_slice(message, &mut buffer)?;
         let mut ciphertext = vec![0; MAX_FRAME];
         let n = self
             .noise
             .lock()
             .map_err(|_| anyhow::anyhow!("Cipher lock poisoned"))?
-            .write_message(&plain, &mut ciphertext)?;
+            .write_message(plain, &mut ciphertext)?;
         write_frame(&mut self.io, &ciphertext[..n]).await
+    }
+}
+
+fn decode_plain(plain: &[u8]) -> Result<Message> {
+    let (message, remaining) = postcard::take_from_bytes(plain)?;
+    anyhow::ensure!(remaining.is_empty(), "Trailing data in control frame");
+    Ok(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config;
+    use tokio::net::TcpListener;
+    #[test]
+    fn rejects_malformed_and_trailing_plaintext() {
+        assert!(decode_plain(&[]).is_err());
+        assert!(decode_plain(&[255; 20]).is_err());
+        let mut bytes = postcard::to_allocvec(&Message::Leave).unwrap();
+        assert!(matches!(decode_plain(&bytes).unwrap(), Message::Leave));
+        bytes.push(0);
+        assert!(decode_plain(&bytes).is_err());
+    }
+    async fn malicious_proxy(replay: bool) {
+        let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = server.local_addr().unwrap();
+        let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = proxy.local_addr().unwrap();
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let initiator = Identity::from_config(&config::load(a.path()).unwrap()).unwrap();
+        let responder = Identity::from_config(&config::load(b.path()).unwrap()).unwrap();
+        let receiver = tokio::spawn(async move {
+            let (stream, _) = server.accept().await.unwrap();
+            let connection = SecureConnection::handshake(stream, &responder, false)
+                .await
+                .unwrap();
+            let (mut reader, _) = connection.split();
+            if replay {
+                assert!(reader.recv().await.is_ok());
+            }
+            assert!(
+                reader.recv().await.is_err(),
+                "Tampered/replayed ciphertext must fail authentication"
+            );
+        });
+        let intermediary = tokio::spawn(async move {
+            let (mut client, _) = proxy.accept().await.unwrap();
+            let mut target = TcpStream::connect(server_addr).await.unwrap();
+            let one = read_frame(&mut client).await.unwrap();
+            write_frame(&mut target, &one).await.unwrap();
+            let two = read_frame(&mut target).await.unwrap();
+            write_frame(&mut client, &two).await.unwrap();
+            let three = read_frame(&mut client).await.unwrap();
+            write_frame(&mut target, &three).await.unwrap();
+            let mut encrypted = read_frame(&mut client).await.unwrap();
+            assert!(!encrypted
+                .windows(b"secret-file-name.txt".len())
+                .any(|w| w == b"secret-file-name.txt"));
+            if replay {
+                write_frame(&mut target, &encrypted).await.unwrap();
+            } else {
+                let n = encrypted.len() - 1;
+                encrypted[n] ^= 0x80;
+            }
+            write_frame(&mut target, &encrypted).await.unwrap();
+        });
+        let conn = SecureConnection::handshake(
+            TcpStream::connect(proxy_addr).await.unwrap(),
+            &initiator,
+            true,
+        )
+        .await
+        .unwrap();
+        let (_, mut writer) = conn.split();
+        writer
+            .send(&Message::BlobStart {
+                id: "test".into(),
+                kind: crate::model::BlobKind::File,
+                name: "secret-file-name.txt".into(),
+                size: 0,
+                hash: "test".into(),
+            })
+            .await
+            .unwrap();
+        intermediary.await.unwrap();
+        receiver.await.unwrap();
+    }
+    #[tokio::test]
+    async fn rejects_tampered_ciphertext() {
+        malicious_proxy(false).await;
+    }
+    #[tokio::test]
+    async fn rejects_replayed_ciphertext() {
+        malicious_proxy(true).await;
+    }
+    #[tokio::test]
+    async fn rejects_empty_handshake_frames() {
+        let server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = server.local_addr().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let id = Identity::from_config(&config::load(dir.path()).unwrap()).unwrap();
+        let task = tokio::spawn(async move {
+            let (stream, _) = server.accept().await.unwrap();
+            assert!(SecureConnection::handshake(stream, &id, false)
+                .await
+                .is_err());
+        });
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        client.write_u16(0).await.unwrap();
+        task.await.unwrap();
     }
 }

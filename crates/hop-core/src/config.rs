@@ -1,4 +1,4 @@
-use crate::model::{LayoutDisplay, Settings, TrustedPeer};
+use crate::model::{HopKey, LayoutDisplay, Settings, TrustedPeer};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -18,6 +18,8 @@ pub struct Config {
     pub layout: Vec<LayoutDisplay>,
     #[serde(default)]
     pub profiles: BTreeMap<String, Vec<LayoutDisplay>>,
+    #[serde(default)]
+    pub hop_keys: Vec<HopKey>,
 }
 pub struct Identity {
     pub private: Zeroizing<Vec<u8>>,
@@ -106,6 +108,7 @@ pub fn load(dir: &Path) -> Result<Config> {
         peers: BTreeMap::new(),
         layout: vec![],
         profiles: BTreeMap::new(),
+        hop_keys: vec![],
     };
     save(dir, &config)?;
     Ok(config)

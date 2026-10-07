@@ -428,8 +428,20 @@ export default function App() {
                     <small>Input is on</small>
                     <strong>{active}</strong>
                   </div>
-                  <Badge tone={data.settings.paused ? "warning" : "success"}>
-                    {data.settings.paused ? "Paused" : "Ready"}
+                  <Badge
+                    tone={
+                      data.settings.paused ||
+                      !data.permissions.capture ||
+                      !data.permissions.injection
+                        ? "warning"
+                        : "success"
+                    }
+                  >
+                    {data.settings.paused
+                      ? "Paused"
+                      : !data.permissions.capture || !data.permissions.injection
+                        ? "Permissions needed"
+                        : "Ready"}
                   </Badge>
                 </div>
                 <div>
@@ -1630,7 +1642,7 @@ function Arrangement({
                   <small>
                     {d.rect.width} × {d.rect.height}
                   </small>
-                  {isLocal && (
+                  {d.device_id === data.active_device && (
                     <span className="cursor-indicator">
                       <MousePointer2 size={21} fill="currentColor" />
                       <span>Your input</span>
@@ -1675,6 +1687,57 @@ function Arrangement({
           Edges switch automatically
         </span>
       </div>
+      {selected &&
+        draft.some((d) => key(d) === selected) &&
+        (() => {
+          const d = draft.find((d) => key(d) === selected)!;
+          const binding = data.hop_keys.find(
+            (b) => b.device_id === d.device_id && b.display_id === d.display_id,
+          );
+          const digit = binding?.keys.find((k) => k >= 30 && k <= 38) || 0;
+          return (
+            <div className="display-inspector">
+              <span>{device(d.device_id)?.name} display</span>
+              <label htmlFor="hop-shortcut">Hop shortcut</label>
+              <select
+                id="hop-shortcut"
+                value={digit}
+                onChange={(e) => {
+                  const digit = Number(e.target.value);
+                  void action(
+                    "set_hop_key",
+                    {
+                      deviceId: d.device_id,
+                      displayId: d.display_id,
+                      keys: digit ? [224, 226, digit] : [],
+                    },
+                    "Display shortcut saved",
+                  );
+                }}
+              >
+                <option value={0}>No shortcut</option>
+                {Array.from({ length: 9 }, (_, i) => (
+                  <option key={i} value={i + 30}>
+                    Ctrl + Alt + {i + 1}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="button small secondary"
+                disabled={d.hidden || data.settings.paused}
+                onClick={() =>
+                  void action(
+                    "jump_to_display",
+                    { deviceId: d.device_id, displayId: d.display_id },
+                    "Input moved to the display",
+                  )
+                }
+              >
+                Jump here
+              </button>
+            </div>
+          );
+        })()}
       <div className="profile-bar">
         <label htmlFor="layout-profile">Layout profile</label>
         <select

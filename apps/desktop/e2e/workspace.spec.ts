@@ -126,3 +126,34 @@ test("small screens stay within the viewport", async ({ page }) => {
     ),
   ).toBe(true);
 });
+
+test("layout profiles restore saved display visibility", async ({ page }) => {
+  await page.getByRole("button", { name: "Save as profile" }).click();
+  await page.getByLabel("Profile name").fill("Home desk");
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Hide Design PC display" }).click();
+  await page.getByRole("button", { name: "Save layout" }).click();
+  await page.getByLabel("Layout profile").selectOption("");
+  await page.getByLabel("Layout profile").selectOption("Home desk");
+  await expect(
+    page.getByRole("button", { name: "Arrange Design PC display" }),
+  ).toBeVisible();
+});
+test("computer sharing permissions are controllable", async ({ page }) => {
+  await page.getByRole("button", { name: "Computers", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Sharing permissions for Design PC" })
+    .click();
+  const toggle = page.getByRole("switch", { name: "Allow files" });
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+});
+test("display shortcuts can be assigned", async ({ page }) => {
+  await page.getByRole("button", { name: "Arrange Design PC display" }).focus();
+  await page.getByLabel("Hop shortcut").selectOption("30");
+  await expect(page.getByLabel("Hop shortcut")).toHaveValue("30");
+  await page.getByRole("button", { name: "Jump here" }).click();
+  await expect(page.getByText("Input moved to the display")).toBeVisible();
+});

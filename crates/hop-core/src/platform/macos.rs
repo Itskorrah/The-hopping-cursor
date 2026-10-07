@@ -278,14 +278,18 @@ impl Platform for Mac {
                 ),
                 InputEvent::Move { x, y } => {
                     let buttons = self.buttons.lock().unwrap();
-                    let kind = if buttons.contains(&0) {
-                        6
-                    } else if buttons.contains(&1) {
-                        7
-                    } else {
-                        5
+                    let (kind, button) = match buttons.iter().next() {
+                        Some(0) => (6, 0),
+                        Some(1) => (7, 1),
+                        Some(button) => (27, *button as u32),
+                        None => (5, 0),
                     };
-                    CGEventCreateMouseEvent(std::ptr::null_mut(), kind, Point { x: *x, y: *y }, 0)
+                    CGEventCreateMouseEvent(
+                        std::ptr::null_mut(),
+                        kind,
+                        Point { x: *x, y: *y },
+                        button,
+                    )
                 }
                 InputEvent::Button { button, down } => {
                     let current = CGEventCreate(std::ptr::null_mut());
@@ -315,17 +319,6 @@ impl Platform for Mac {
                     } else {
                         held.remove(code);
                     }
-                    let mut flags = 0u64;
-                    for h in held.iter() {
-                        flags |= match h {
-                            224 | 228 => 1 << 18,
-                            225 | 229 => 1 << 17,
-                            226 | 230 => 1 << 19,
-                            227 | 231 => 1 << 20,
-                            _ => 0,
-                        };
-                    }
-                    CGEventSetFlags(e, flags);
                 }
                 InputEvent::Button { button, down } => {
                     if *down {
@@ -336,6 +329,19 @@ impl Platform for Mac {
                 }
                 _ => {}
             }
+            // Mouse/scroll events must carry the mapped held modifiers too.
+            // Preserve OS lock/function flags while replacing the four modifiers.
+            let mut flags = CGEventGetFlags(e) & !((1 << 17) | (1 << 18) | (1 << 19) | (1 << 20));
+            for h in self.held.lock().unwrap().iter() {
+                flags |= match h {
+                    224 | 228 => 1 << 18,
+                    225 | 229 => 1 << 17,
+                    226 | 230 => 1 << 19,
+                    227 | 231 => 1 << 20,
+                    _ => 0,
+                };
+            }
+            CGEventSetFlags(e, flags);
             CGEventSetIntegerValueField(e, 42, MARKER);
             CGEventPost(0, e);
             CFRelease(e);
@@ -344,6 +350,34 @@ impl Platform for Mac {
     }
     fn read_clipboard(&self) -> Result<Vec<ClipboardPart>> {
         super::clipboard::read()
+    }
+    fn clipboard_revision(&self) -> Option<u64> {
+        unsafe {
+            #[link(name = "objc")]
+            extern "C" {
+                fn objc_getClass(name: *const i8) -> Ref;
+                fn sel_registerName(name: *const i8) -> Ref;
+                fn objc_msgSend();
+                fn objc_autoreleasePoolPush() -> Ref;
+                fn objc_autoreleasePoolPop(pool: Ref);
+            }
+            let pool = objc_autoreleasePoolPush();
+            let msg: unsafe extern "C" fn(Ref, Ref) -> Ref =
+                std::mem::transmute(objc_msgSend as *const ());
+            let count: unsafe extern "C" fn(Ref, Ref) -> isize =
+                std::mem::transmute(objc_msgSend as *const ());
+            let pb = msg(
+                objc_getClass(c"NSPasteboard".as_ptr()),
+                sel_registerName(c"generalPasteboard".as_ptr()),
+            );
+            let result = if pb.is_null() {
+                None
+            } else {
+                Some(count(pb, sel_registerName(c"changeCount".as_ptr())) as u64)
+            };
+            objc_autoreleasePoolPop(pool);
+            result
+        }
     }
     fn write_clipboard(&self, p: &[ClipboardPart]) -> Result<()> {
         super::clipboard::write(p)

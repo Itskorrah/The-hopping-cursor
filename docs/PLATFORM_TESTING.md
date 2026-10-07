@@ -15,6 +15,8 @@ An installer build is not evidence that input behavior has passed this checklist
    Test every local display, multiple remote displays, Retina and Windows scaling.
    Hidden displays must not become hopping destinations. Restart after hotplug
    in this first version; stable hardware identification/hotplug refresh is pending.
+   Save/load named profiles and test Ctrl+Alt+1–9 monitor bindings, including
+   offline/hidden destinations and key-up cleanup after a hop chord.
 4. Verify typing, arrows, function keys, left/right modifiers, international
    layouts, scroll direction, mouse buttons, dragging text, and held shortcuts
    across boundaries. Test Command/Control translation on and off. Vendor/media
@@ -31,6 +33,8 @@ An installer build is not evidence that input behavior has passed this checklist
    files, duplicates, slow network, quota refusal, disk full, cancellation, and
    disconnect. Confirm exact bytes, unique names, and partial cleanup. Test a
    filesystem without hard links to ensure a clear error rather than data loss.
+   Pause and revoke file permission while awaiting acceptance and during a large
+   transfer: outstanding offers must expire and incomplete files must disappear.
 8. Unpair while controlling/transferring; permission must be revoked. Restart
    both computers and verify identities, preferences, and layouts persist.
 9. Verify tray Open, Pause/Resume, Bring input here, and Quit. Closing the main
