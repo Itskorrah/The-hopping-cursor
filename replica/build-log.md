@@ -63,4 +63,9 @@ exposed an empty file-URL read-back on both ARM runner jobs. Added explicit
 AppKit linkage and file-URL-only read options; both jobs now pass twenty isolated
 clipboard repetitions plus the full suite. BUG-007 records the evidence and
 remaining uncertainty about the original empty read. The latest local app
-launch appears to await a native macOS security approval.
+opens with real local display data and zero paired/connected peers; native
+diagnostics and permission requests work. Accessibility / Input Monitoring
+approval remains pending; an earlier launch timeout resolved without an
+established cause. Run 37884039823 on a18c1d1 passed all five CI jobs, including
+native Intel and ARM Mac suites and twenty isolated pasteboard repetitions per
+host, Windows native checks, and all three unsigned installer builds.

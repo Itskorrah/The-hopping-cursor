@@ -69,12 +69,12 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
   five pages and a 390px viewport. These exercise the labelled browser preview.
 - Native Mac debug bundle builds and launches with real local display data.
   Actual Keychain migration preserved the preexisting public identity and removed
-  the private key from the real JSON config. The last native window check reported
-  missing input permission; the request button was exercised. Cross-computer
-  input was not tested. The updated bundle builds locally; a later native window
-  check was blocked because the Mac was locked. After it became accessible,
-  restarting the updated bundle appeared to await a macOS security approval;
-  that dialog requires human action before current window checks can proceed.
+  the private key from the real JSON config. The updated bundle opens with one
+  real local display and zero paired/connected peers. Native diagnostics and the
+  permission-request action work; diagnostics still report missing Accessibility
+  / Input Monitoring permission. An earlier launch timeout resolved on a later
+  native window check; its cause was not established. Human approval and a fresh
+  permission check remain pending. Cross-computer input was not tested.
 
 ## Native CI evidence
 
@@ -95,6 +95,13 @@ clipboard repetitions. Its Mac jobs both ran on ARM hosts; the Intel artifact
 was cross-compiled. CI now selects macOS 15 ARM and macOS 15 Intel runners
 explicitly to exercise both native ABIs and avoid the retiring macOS 14 image.
 Runner labels follow [GitHub's supported architectures](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+[Run 37884039823](https://github.com/Itskorrah/The-hopping-cursor/actions/runs/37884039823)
+passed all five jobs on a18c1d1. The native suite, strict core/CLI Clippy and twenty
+isolated pasteboard repetitions passed on both actual ARM and Intel Mac hosts.
+Windows native tests and CF_HDROP checks passed; all three installer targets built.
+This closes the earlier Intel runtime coverage gap without establishing physical
+input, Finder/Explorer paste acceptance, or multi-computer behavior.
 
 ## Still required
 
