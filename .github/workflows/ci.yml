@@ -54,12 +54,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: cargo clippy --locked -p hop-core -p hopping-cursor --all-targets --target ${{ matrix.target }} -- -D warnings
       - run: cargo test -p hop-core
       - run: npm run tauri -w apps/desktop -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: Verify installer exists
