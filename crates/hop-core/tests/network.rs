@@ -7,6 +7,23 @@ use std::{
     time::{Duration, Instant},
 };
 
+async fn start_test(
+    dir: std::path::PathBuf,
+    port: Option<u16>,
+    backend: Arc<dyn hop_core::platform::Platform>,
+) -> anyhow::Result<Arc<Service>> {
+    Service::start_with_options(
+        dir,
+        port,
+        backend,
+        hop_core::StartOptions {
+            discovery: false,
+            protect_identity: false,
+        },
+    )
+    .await
+}
+
 struct Pair {
     a: Arc<Service>,
     b: Arc<Service>,
@@ -43,19 +60,18 @@ async fn pair(auto_accept: bool) -> Pair {
     }
     let pa = Arc::new(Headless::default());
     let pb = Arc::new(Headless::default());
-    let a = Service::start(da.path().to_owned(), Some(0), pa.clone())
+    let a = start_test(da.path().to_owned(), Some(0), pa.clone())
         .await
         .unwrap();
-    let b = Service::start(db.path().to_owned(), Some(0), pb.clone())
+    let b = start_test(db.path().to_owned(), Some(0), pb.clone())
         .await
         .unwrap();
     let address = format!("127.0.0.1:{}", b.listening_port);
-    assert!(a
-        .connect(&address)
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("Pairing pending"));
+    let introduction = a.connect(&address).await.unwrap_err();
+    assert!(
+        introduction.to_string().contains("Pairing pending"),
+        "Expected pairing introduction, received: {introduction:#}"
+    );
     wait(|| {
         b.snapshot()
             .peers
@@ -452,7 +468,7 @@ async fn restart_restores_known_computers_and_file_send_without_rediscovery() {
     let p = pair(true).await;
     let target = p.b.snapshot();
     p.a.shutdown();
-    let restarted = Service::start(p._a.path().into(), Some(0), Arc::new(Headless::default()))
+    let restarted = start_test(p._a.path().into(), Some(0), Arc::new(Headless::default()))
         .await
         .unwrap();
     let saved = restarted
@@ -480,4 +496,96 @@ async fn restart_restores_known_computers_and_file_send_without_rediscovery() {
             .unwrap(),
         b"remembered address"
     );
+}
+
+#[tokio::test]
+async fn simultaneous_connections_keep_one_live_control_channel() {
+    let p = pair(true).await;
+    p.a.shutdown();
+    p.b.shutdown();
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    let a = start_test(p._a.path().into(), Some(0), p.pa.clone())
+        .await
+        .unwrap();
+    let b = start_test(p._b.path().into(), Some(0), p.pb.clone())
+        .await
+        .unwrap();
+    let a_address = format!("127.0.0.1:{}", a.listening_port);
+    let b_address = format!("127.0.0.1:{}", b.listening_port);
+    let (one, two) = tokio::join!(a.connect(&b_address), b.connect(&a_address));
+    one.unwrap();
+    two.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(a
+        .snapshot()
+        .peers
+        .iter()
+        .any(|p| p.connected && p.latency_ms.is_some()));
+    assert!(b
+        .snapshot()
+        .peers
+        .iter()
+        .any(|p| p.connected && p.latency_ms.is_some()));
+    let saved_b = config::load(p._b.path()).unwrap();
+    assert_eq!(
+        saved_b.peers[&a.snapshot().local.id].address.as_deref(),
+        Some(a_address.as_str())
+    );
+    let file = p._a.path().join("after-race.txt");
+    tokio::fs::write(&file, b"connection survived")
+        .await
+        .unwrap();
+    a.send_file(&b.snapshot().local.id, file).await.unwrap();
+    a.shutdown();
+    b.shutdown();
+}
+
+#[tokio::test]
+async fn hotplug_releases_input_reconciles_profiles_and_refreshes_peer_metadata() {
+    let p = pair(true).await;
+    let original = p.a.snapshot();
+    p.a.save_profile("Desk").unwrap();
+    p.a.jump_to_display(&p.b.snapshot().local.id, "headless-main")
+        .unwrap();
+    wait(|| {
+        p.b.snapshot().active_device != p.b.snapshot().local.id
+            || !p.pb.events.lock().unwrap().is_empty()
+    })
+    .await;
+    let mut display = original.local.displays[0].clone();
+    display.id = "new-monitor".into();
+    display.bounds.width = 2560.;
+    *p.pa.display_override.lock().unwrap() = Some(vec![display]);
+    assert!(p.a.refresh_displays().unwrap());
+    assert_eq!(p.a.snapshot().active_device, original.local.id);
+    assert!(!p
+        .a
+        .snapshot()
+        .layout
+        .iter()
+        .any(|d| d.device_id == original.local.id && d.display_id == "headless-main"));
+    p.a.load_profile("Desk").unwrap();
+    assert!(p
+        .a
+        .snapshot()
+        .layout
+        .iter()
+        .any(|d| d.device_id == original.local.id && d.display_id == "new-monitor"));
+    assert_eq!(
+        config::load(p._a.path()).unwrap().profiles["Desk"],
+        original.layout
+    );
+    wait(|| {
+        p.a.snapshot().peers.iter().any(|peer| peer.connected)
+            && p.b.snapshot().peers.iter().any(|peer| {
+                peer.connected && peer.device.displays.iter().any(|d| d.id == "new-monitor")
+            })
+    })
+    .await;
+    assert!(p
+        .pb
+        .events
+        .lock()
+        .unwrap()
+        .contains(&InputEvent::ReleaseAll));
 }

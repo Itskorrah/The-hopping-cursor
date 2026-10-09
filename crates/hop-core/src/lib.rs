@@ -1,9 +1,10 @@
 pub mod config;
 pub mod crypto;
+mod identity_store;
 pub mod model;
 pub mod platform;
 mod service;
 pub mod topology;
 mod transfer;
 pub use model::*;
-pub use service::Service;
+pub use service::{Service, StartOptions};

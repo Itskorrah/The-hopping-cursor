@@ -113,6 +113,12 @@ impl Platform for Windows {
     fn displays(&self) -> Result<Vec<Display>> {
         super::display_list()
     }
+    fn display_id_aliases(&self) -> Result<std::collections::BTreeMap<String, String>> {
+        Ok(display_info::DisplayInfo::all()?
+            .iter()
+            .map(|d| (format!("display-{}", d.id), super::windows_display_id(d)))
+            .collect())
+    }
     fn permissions(&self) -> Permissions {
         Permissions{capture:true,injection:true,clipboard:true,explanation:"Normal desktop input available. Elevated apps and Windows secure desktop require additional privileged-service work.".into()}
     }

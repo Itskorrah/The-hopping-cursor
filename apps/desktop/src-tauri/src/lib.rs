@@ -44,6 +44,13 @@ fn delete_profile(engine: State<'_, Engine>, name: String) -> Result<(), String>
     engine.delete_profile(&name).map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn request_input_permissions(engine: State<'_, Engine>) -> Result<hop_core::Permissions, String> {
+    engine
+        .inner()
+        .request_input_permissions()
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 fn snapshot(engine: State<'_, Engine>) -> Snapshot {
     engine.snapshot()
 }
@@ -126,8 +133,16 @@ pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    let app=tauri::Builder::default().plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![snapshot,update_settings,save_layout,approve_peer,forget_peer,peer_permissions,connect_address,send_files,respond_transfer,cancel_transfer,release_input,export_diagnostics,save_profile,load_profile,delete_profile,set_hop_key,jump_to_display])
+    let app=tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![request_input_permissions,snapshot,update_settings,save_layout,approve_peer,forget_peer,peer_permissions,connect_address,send_files,respond_transfer,cancel_transfer,release_input,export_diagnostics,save_profile,load_profile,delete_profile,set_hop_key,jump_to_display])
         .setup(|app|{
             let engine=tauri::async_runtime::block_on(Service::start(hop_core::config::default_config_dir()?,None,hop_core::platform::native()))?;app.manage(engine);
             let open=MenuItem::with_id(app,"open","Open The Hopping Cursor",true,None::<&str>)?;
@@ -146,6 +161,13 @@ pub fn run() {
         .on_window_event(|window,event|{if let tauri::WindowEvent::CloseRequested{api,..}=event{api.prevent_close();let _=window.hide();}})
         .build(tauri::generate_context!()).expect("Could not start The Hopping Cursor. Check permissions and whether TCP port 24810 is already in use.");
     app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
         if let tauri::RunEvent::Exit = event {
             if let Some(engine) = app.try_state::<Engine>() {
                 engine.shutdown();

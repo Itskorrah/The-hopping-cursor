@@ -29,6 +29,21 @@ struct CGRect {
     origin: Point,
     size: Size,
 }
+#[repr(C)]
+struct UuidBytes {
+    bytes: [u8; 16],
+}
+fn display_id(id: u32) -> String {
+    unsafe {
+        let uuid = CGDisplayCreateUUIDFromDisplayID(id);
+        if uuid.is_null() {
+            return format!("display-{id}");
+        }
+        let bytes = CFUUIDGetUUIDBytes(uuid);
+        CFRelease(uuid);
+        format!("mac-{}", hex::encode(bytes.bytes))
+    }
+}
 const MARKER: i64 = 0x484f505043555253;
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
@@ -52,14 +67,18 @@ extern "C" {
     fn CGEventCreateScrollWheelEvent(source: Ref, units: u32, count: u32, ...) -> Ref;
     fn CGEventPost(tap: u32, event: Ref);
     fn CGPreflightListenEventAccess() -> bool;
+    fn CGRequestListenEventAccess() -> bool;
     fn CGGetActiveDisplayList(max: u32, ids: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(id: u32) -> CGRect;
     fn CGMainDisplayID() -> u32;
     fn CGDisplayPixelsWide(id: u32) -> usize;
+    fn CGDisplayCreateUUIDFromDisplayID(id: u32) -> Ref;
 }
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXIsProcessTrusted() -> bool;
+    fn AXIsProcessTrustedWithOptions(options: Ref) -> bool;
+    static kAXTrustedCheckOptionPrompt: Ref;
 }
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
@@ -69,6 +88,16 @@ extern "C" {
     fn CFRunLoopRun();
     fn CFRunLoopStop(runloop: Ref);
     fn CFRelease(value: Ref);
+    fn CFUUIDGetUUIDBytes(value: Ref) -> UuidBytes;
+    fn CFDictionaryCreate(
+        allocator: Ref,
+        keys: *const Ref,
+        values: *const Ref,
+        count: isize,
+        key_callbacks: Ref,
+        value_callbacks: Ref,
+    ) -> Ref;
+    static kCFBooleanTrue: Ref;
     static kCFRunLoopCommonModes: Ref;
 }
 struct TapContext {
@@ -174,7 +203,7 @@ impl Platform for Mac {
                 .map(|id| {
                     let b = CGDisplayBounds(*id);
                     Display {
-                        id: format!("display-{id}"),
+                        id: display_id(*id),
                         name: format!("Display {id}"),
                         bounds: Rect {
                             x: b.origin.x,
@@ -189,12 +218,50 @@ impl Platform for Mac {
                 .collect())
         }
     }
+    fn display_id_aliases(&self) -> Result<std::collections::BTreeMap<String, String>> {
+        unsafe {
+            let mut ids = [0; 32];
+            let mut count = 0;
+            anyhow::ensure!(
+                CGGetActiveDisplayList(32, ids.as_mut_ptr(), &mut count) == 0,
+                "Cannot enumerate displays"
+            );
+            Ok(ids[..count as usize]
+                .iter()
+                .map(|id| (format!("display-{id}"), display_id(*id)))
+                .collect())
+        }
+    }
     fn permissions(&self) -> Permissions {
         unsafe {
             let injection = AXIsProcessTrusted();
             let capture = CGPreflightListenEventAccess();
             Permissions{capture,injection,clipboard:true,explanation:if capture&&injection{"Accessibility and Input Monitoring granted."}else{"Grant Accessibility and Input Monitoring in System Settings → Privacy & Security, then restart the app."}.into()}
         }
+    }
+    fn request_permissions(&self) -> Permissions {
+        unsafe {
+            if !AXIsProcessTrusted() {
+                let key = kAXTrustedCheckOptionPrompt;
+                let value = kCFBooleanTrue;
+                let options = CFDictionaryCreate(
+                    std::ptr::null_mut(),
+                    &key,
+                    &value,
+                    1,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                );
+                if !options.is_null() {
+                    AXIsProcessTrustedWithOptions(options);
+                    CFRelease(options);
+                }
+            }
+            if !CGPreflightListenEventAccess() {
+                CGRequestListenEventAccess();
+            }
+        }
+        self.permissions()
     }
     fn start_capture(&self, cb: CaptureCallback) -> Result<()> {
         let p = self.permissions();

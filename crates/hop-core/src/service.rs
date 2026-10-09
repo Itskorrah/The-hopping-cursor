@@ -26,6 +26,7 @@ use tokio::{
 pub(crate) struct State {
     pub local: Device,
     pub peers: PeerMap,
+    discovered: BTreeMap<String, Vec<String>>,
     pub transfers: BTreeMap<String, TransferStatus>,
     pub diagnostics: Vec<String>,
     active: Option<Active>,
@@ -70,9 +71,24 @@ struct Active {
 #[derive(Clone)]
 struct Channel {
     generation: String,
+    preferred: bool,
     tx: mpsc::Sender<(u64, Message)>,
     priority: mpsc::UnboundedSender<Message>,
     epoch: Arc<AtomicU64>,
+}
+/// Disable multicast for embedded/manual-only engines and isolated TCP tests.
+#[derive(Clone, Copy)]
+pub struct StartOptions {
+    pub discovery: bool,
+    pub protect_identity: bool,
+}
+impl Default for StartOptions {
+    fn default() -> Self {
+        Self {
+            discovery: true,
+            protect_identity: true,
+        }
+    }
 }
 pub struct Service {
     pub(crate) identity: Identity,
@@ -85,6 +101,7 @@ pub struct Service {
     pub(crate) decisions: Mutex<BTreeMap<String, oneshot::Sender<bool>>>,
     pub(crate) cancelled: Mutex<BTreeSet<String>>,
     pub(crate) stop: watch::Sender<bool>,
+    metadata_changed: watch::Sender<u64>,
     pub listening_port: u16,
 }
 impl Service {
@@ -93,7 +110,19 @@ impl Service {
         port_override: Option<u16>,
         backend: Arc<dyn Platform>,
     ) -> Result<Arc<Self>> {
-        let mut config = config::load(&dir)?;
+        Self::start_with_options(dir, port_override, backend, StartOptions::default()).await
+    }
+    pub async fn start_with_options(
+        dir: PathBuf,
+        port_override: Option<u16>,
+        backend: Arc<dyn Platform>,
+        options: StartOptions,
+    ) -> Result<Arc<Self>> {
+        let mut config = if options.protect_identity {
+            config::load_native(&dir)?
+        } else {
+            config::load(&dir)?
+        };
         let identity = Identity::from_config(&config)?;
         let listener =
             TcpListener::bind(("0.0.0.0", port_override.unwrap_or(config.settings.port)))
@@ -108,34 +137,11 @@ impl Service {
             platform: backend.name().into(),
             displays,
         };
-        // Preserve existing arrangement; newly attached displays are placed to the right.
-        for d in &local.displays {
-            if !config
-                .layout
-                .iter()
-                .any(|l| l.device_id == local.id && l.display_id == d.id)
-            {
-                let x = config
-                    .layout
-                    .iter()
-                    .filter(|l| !l.hidden)
-                    .map(|l| l.rect.x + l.rect.width)
-                    .fold(0., f64::max);
-                config.layout.push(LayoutDisplay {
-                    device_id: local.id.clone(),
-                    display_id: d.id.clone(),
-                    rect: Rect {
-                        x,
-                        y: 0.,
-                        width: d.bounds.width,
-                        height: d.bounds.height,
-                    },
-                    hidden: false,
-                });
-            }
-        }
+        migrate_display_ids(&mut config, &local.id, &backend.display_id_aliases()?);
+        topology::reconcile_device(&mut config.layout, &local);
         config::save(&dir, &config)?;
         let (stop, _) = watch::channel(false);
+        let (metadata_changed, _) = watch::channel(0);
         let primary = local
             .displays
             .iter()
@@ -181,6 +187,7 @@ impl Service {
             state: Mutex::new(State {
                 local,
                 peers,
+                discovered: BTreeMap::new(),
                 transfers: BTreeMap::new(),
                 diagnostics: vec![],
                 active: None,
@@ -199,6 +206,7 @@ impl Service {
             cancelled: Mutex::new(BTreeSet::new()),
             stop,
             listening_port,
+            metadata_changed,
         });
         let weak = Arc::downgrade(&this);
         if let Err(e) = this.backend.start_capture(Arc::new(move |event| {
@@ -212,6 +220,9 @@ impl Service {
         let s = this.clone();
         tokio::spawn(async move {
             let mut stop = s.stop.subscribe();
+            if *stop.borrow() {
+                return;
+            }
             let permits = Arc::new(tokio::sync::Semaphore::new(32));
             loop {
                 tokio::select! {_ = stop.changed()=>break,result=listener.accept()=>match result{Ok((stream,address))=>{
@@ -220,10 +231,26 @@ impl Service {
                 },Err(e)=>s.note(format!("Listener: {e}"))}}
             }
         });
-        this.start_discovery();
+        if options.discovery {
+            this.start_discovery();
+        }
         this.start_reconnect();
         this.start_clipboard();
+        this.start_display_refresh();
         Ok(this)
+    }
+    /// Called only by an explicit user action; never prompts during background work.
+    pub fn request_input_permissions(self: &Arc<Self>) -> Result<Permissions> {
+        let permissions = self.backend.request_permissions();
+        if permissions.capture && permissions.injection {
+            self.release();
+            self.backend.stop_capture();
+            let weak = Arc::downgrade(self);
+            self.backend.start_capture(Arc::new(move |event| {
+                weak.upgrade().is_some_and(|s| s.capture(event))
+            }))?;
+        }
+        Ok(permissions)
     }
     pub fn snapshot(&self) -> Snapshot {
         let c = self.config.lock().unwrap();
@@ -280,6 +307,7 @@ impl Service {
             "Receiving folder must be an absolute path"
         );
         let should_release = settings.paused;
+        let renamed = self.routing.load().settings.device_name != settings.device_name;
         let mut c = self.config.lock().unwrap();
         let mut next = c.clone();
         next.settings = settings;
@@ -288,6 +316,10 @@ impl Service {
         self.update_routing(&c);
         self.state.lock().unwrap().local.name = c.settings.device_name.clone();
         drop(c);
+        if renamed {
+            self.disconnect_controls();
+            self.metadata_changed.send_modify(|n| *n += 1);
+        }
         if should_release {
             self.release();
             self.cancel_peer_files(None);
@@ -502,7 +534,7 @@ impl Service {
         Ok(())
     }
     pub fn load_profile(&self, name: &str) -> Result<()> {
-        let layout = self
+        let mut layout = self
             .config
             .lock()
             .unwrap()
@@ -510,6 +542,12 @@ impl Service {
             .get(name)
             .cloned()
             .context("Unknown layout profile")?;
+        let state = self.state.lock().unwrap();
+        topology::reconcile_device(&mut layout, &state.local);
+        for peer in state.peers.values().filter(|p| p.connected) {
+            topology::reconcile_device(&mut layout, &peer.device);
+        }
+        drop(state);
         self.set_layout(layout)
     }
     pub fn delete_profile(&self, name: &str) -> Result<()> {
@@ -591,9 +629,79 @@ impl Service {
     pub fn shutdown(&self) {
         self.release();
         self.backend.stop_capture();
-        let _ = self.stop.send(true);
+        self.stop.send_replace(true);
         self.channels.lock().unwrap().clear();
         self.decisions.lock().unwrap().clear();
+    }
+    fn disconnect_controls(&self) {
+        self.release();
+        let mut state = self.state.lock().unwrap();
+        let mut channels = self.channels.lock().unwrap();
+        channels.clear();
+        for peer in state.peers.values_mut() {
+            peer.connected = false;
+            peer.latency_ms = None;
+        }
+    }
+    pub fn refresh_displays(&self) -> Result<bool> {
+        let displays = self.backend.displays()?;
+        anyhow::ensure!(
+            !displays.is_empty() && displays.iter().all(|d| d.bounds.valid()),
+            "No usable displays available"
+        );
+        if self.state.lock().unwrap().local.displays == displays {
+            return Ok(false);
+        }
+        self.disconnect_controls();
+        let aliases = self.backend.display_id_aliases()?;
+        let mut config = self.config.lock().unwrap();
+        let mut next = config.clone();
+        let mut local = self.state.lock().unwrap().local.clone();
+        local.displays = displays;
+        migrate_display_ids(&mut next, &local.id, &aliases);
+        topology::reconcile_device(&mut next.layout, &local);
+        topology::validate(&next.layout)?;
+        config::save(&self.config_dir, &next)?;
+        *config = next;
+        self.update_routing(&config);
+        let mut state = self.state.lock().unwrap();
+        state.local = local;
+        let display = &state.local.displays[0];
+        let center = (
+            display.bounds.x + display.bounds.width / 2.,
+            display.bounds.y + display.bounds.height / 2.,
+        );
+        if !state.local.displays.iter().any(|d| {
+            d.bounds
+                .contains(state.local_position.0, state.local_position.1)
+        }) {
+            state.local_position = center;
+        }
+        drop(state);
+        drop(config);
+        self.metadata_changed.send_modify(|n| *n += 1);
+        self.note("Display configuration refreshed; input returned locally".into());
+        Ok(true)
+    }
+    fn start_display_refresh(self: &Arc<Self>) {
+        let service = self.clone();
+        tokio::spawn(async move {
+            let mut stop = service.stop.subscribe();
+            if *stop.borrow() {
+                return;
+            }
+            let mut tick = tokio::time::interval(Duration::from_secs(2));
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = stop.changed() => break,
+                    _ = tick.tick() => {
+                        let service = service.clone();
+                        let _ = tokio::task::spawn_blocking(move || { if let Err(error) = service.refresh_displays() { service.note(format!("Display refresh: {error}")); } }).await;
+                    }
+                }
+            }
+        });
     }
     pub fn export_diagnostics(&self) -> String {
         let snapshot = self.snapshot();
@@ -631,20 +739,24 @@ impl Service {
             .await
             .context("Connection timed out")??;
         let secure = SecureConnection::handshake(stream, &self.identity, true).await?;
-        self.exchange(secure, address, purpose, true).await
+        self.exchange(secure, address, purpose, None).await
     }
     async fn exchange(
         self: &Arc<Self>,
         secure: SecureConnection,
         address: SocketAddr,
         purpose: &str,
-        outgoing: bool,
+        expected_id: Option<&str>,
     ) -> Result<(String, SecureReader, SecureWriter)> {
         let key = secure.remote_key().to_vec();
         let id = config::device_id(&key);
         anyhow::ensure!(
             id != self.identity.id,
             "Cannot connect to this computer itself"
+        );
+        anyhow::ensure!(
+            expected_id.is_none_or(|expected| expected == id),
+            "Address belongs to a different computer"
         );
         let approved = self.approved(&id, &key)?;
         let (mut reader, mut writer) = secure.split();
@@ -657,14 +769,8 @@ impl Service {
             approved,
         };
         let remote = tokio::time::timeout(Duration::from_secs(5), async {
-            if outgoing {
-                writer.send(&hello).await?;
-                reader.recv().await
-            } else {
-                let remote = reader.recv().await?;
-                writer.send(&hello).await?;
-                Ok(remote)
-            }
+            writer.send(&hello).await?;
+            reader.recv().await
         })
         .await
         .context("Peer introduction timed out")??;
@@ -733,31 +839,7 @@ impl Service {
             if let Some(p) = next.peers.get_mut(&id) {
                 p.address = Some(address.to_string());
             }
-            for d in &device.displays {
-                if !next
-                    .layout
-                    .iter()
-                    .any(|l| l.device_id == id && l.display_id == d.id)
-                {
-                    let x = next
-                        .layout
-                        .iter()
-                        .filter(|d| !d.hidden)
-                        .map(|d| d.rect.x + d.rect.width)
-                        .fold(0., f64::max);
-                    next.layout.push(LayoutDisplay {
-                        device_id: id.clone(),
-                        display_id: d.id.clone(),
-                        rect: Rect {
-                            x,
-                            y: 0.,
-                            width: d.bounds.width,
-                            height: d.bounds.height,
-                        },
-                        hidden: false,
-                    });
-                }
-            }
+            topology::reconcile_device(&mut next.layout, &device);
             config::save(&self.config_dir, &next)?;
             *c = next;
             self.update_routing(&c);
@@ -766,7 +848,17 @@ impl Service {
     }
     pub async fn connect(self: &Arc<Self>, address: &str) -> Result<()> {
         let (id, reader, writer) = self.open(address, "control").await?;
-        self.start_control(id, reader, writer);
+        self.start_control(id, reader, writer, true);
+        Ok(())
+    }
+    async fn reconnect(self: &Arc<Self>, id: &str, address: &str) -> Result<()> {
+        let address: SocketAddr = address.parse()?;
+        anyhow::ensure!(local_ip(address.ip()), "Only local addresses are supported");
+        let stream =
+            tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(address)).await??;
+        let secure = SecureConnection::handshake(stream, &self.identity, true).await?;
+        let (id, reader, writer) = self.exchange(secure, address, "control", Some(id)).await?;
+        self.start_control(id, reader, writer, true);
         Ok(())
     }
     async fn accept(self: &Arc<Self>, stream: TcpStream, address: SocketAddr) -> Result<()> {
@@ -861,36 +953,15 @@ impl Service {
             {
                 let mut c = self.config.lock().unwrap();
                 let mut next = c.clone();
-                for d in &device.displays {
-                    if !next
-                        .layout
-                        .iter()
-                        .any(|l| l.device_id == id && l.display_id == d.id)
-                    {
-                        let x = next
-                            .layout
-                            .iter()
-                            .filter(|d| !d.hidden)
-                            .map(|d| d.rect.x + d.rect.width)
-                            .fold(0., f64::max);
-                        next.layout.push(LayoutDisplay {
-                            device_id: id.clone(),
-                            display_id: d.id.clone(),
-                            rect: Rect {
-                                x,
-                                y: 0.,
-                                width: d.bounds.width,
-                                height: d.bounds.height,
-                            },
-                            hidden: false,
-                        });
-                    }
+                if let Some(peer) = next.peers.get_mut(&id) {
+                    peer.address = Some(SocketAddr::new(address.ip(), port).to_string());
                 }
+                topology::reconcile_device(&mut next.layout, &device);
                 config::save(&self.config_dir, &next)?;
                 *c = next;
                 self.update_routing(&c);
             }
-            self.start_control(id, reader, writer);
+            self.start_control(id, reader, writer, false);
         } else {
             self.receive_blob(id, reader, writer).await?;
         }
@@ -901,29 +972,37 @@ impl Service {
         id: String,
         mut reader: SecureReader,
         mut writer: SecureWriter,
+        outgoing: bool,
     ) {
         let (tx, mut rx) = mpsc::channel(512);
         let (priority, mut urgent) = mpsc::unbounded_channel();
         let epoch = Arc::new(AtomicU64::new(0));
         let generation = uuid::Uuid::new_v4().to_string();
+        // Both ends retain the connection initiated by the lower identity.
+        let preferred = outgoing == (self.identity.id < id);
         {
+            let mut state = self.state.lock().unwrap();
             let mut channels = self.channels.lock().unwrap();
-            if channels.contains_key(&id) {
+            if channels
+                .get(&id)
+                .is_some_and(|existing| existing.preferred || !preferred)
+            {
                 return;
             }
             channels.insert(
                 id.clone(),
                 Channel {
                     generation: generation.clone(),
+                    preferred,
                     tx,
                     priority,
                     epoch: epoch.clone(),
                 },
             );
-        }
-        if let Some(p) = self.state.lock().unwrap().peers.get_mut(&id) {
-            p.connected = true;
-            p.last_error = None;
+            if let Some(p) = state.peers.get_mut(&id) {
+                p.connected = true;
+                p.last_error = None;
+            }
         }
         let s = self.clone();
         tokio::spawn(async move {
@@ -940,6 +1019,9 @@ impl Service {
                 }
             });
             let mut stop = s.stop.subscribe();
+            if *stop.borrow() {
+                return;
+            }
             let start = Instant::now();
             let mut last_received = Instant::now();
             let mut heartbeat = tokio::time::interval(Duration::from_millis(300));
@@ -953,6 +1035,7 @@ impl Service {
                     tokio::time::timeout(Duration::from_millis(750),writer.send(&Message::Ping(start.elapsed().as_micros() as u64))).await.context("Control writer stalled")??;
                 },
                 message=incoming.recv()=>{
+                    if !s.channels.lock().unwrap().get(&id).is_some_and(|c|c.generation==generation){break;}
                     let message=message.context("Control reader closed")??;last_received=Instant::now();match message{
                         Message::Ping(n)=>tokio::time::timeout(Duration::from_millis(750),writer.send(&Message::Pong(n))).await.context("Heartbeat writer stalled")??,
                         Message::Pong(n)=>{let elapsed=start.elapsed().as_micros() as u64;anyhow::ensure!(n<=elapsed,"Invalid ping response");if let Some(p)=s.state.lock().unwrap().peers.get_mut(&id){p.latency_ms=Some((elapsed-n) as f64/1000.);}},
@@ -962,17 +1045,16 @@ impl Service {
                 message=rx.recv()=>match message{Some((sent_epoch,m))=>{if sent_epoch!=epoch.load(Ordering::SeqCst){continue;}tokio::time::timeout(Duration::from_millis(750),writer.send(&m)).await.context("Input writer stalled")??;},None=>break},
             }}Ok(())}.await;
             reader_task.abort();
-            {
+            let needs_release = {
+                let mut st = s.state.lock().unwrap();
                 let mut channels = s.channels.lock().unwrap();
-                if channels
+                if !channels
                     .get(&id)
                     .is_some_and(|c| c.generation == generation)
                 {
-                    channels.remove(&id);
+                    return; // Superseded tasks must not disconnect a replacement.
                 }
-            }
-            let needs_release = {
-                let mut st = s.state.lock().unwrap();
+                channels.remove(&id);
                 if let Some(p) = st.peers.get_mut(&id) {
                     p.connected = false;
                     p.last_error = result.as_ref().err().map(|e| e.to_string());
@@ -1398,18 +1480,123 @@ impl Service {
             );
         }
     }
+    fn reconnect_candidates(&self) -> Vec<(String, Vec<String>)> {
+        let config = self.config.lock().unwrap();
+        let state = self.state.lock().unwrap();
+        config
+            .peers
+            .iter()
+            .filter(|(id, _)| !state.peers.get(*id).is_some_and(|p| p.connected))
+            .map(|(id, peer)| {
+                let mut addresses = Vec::new();
+                for address in state
+                    .peers
+                    .get(id)
+                    .map(|p| &p.address)
+                    .into_iter()
+                    .chain(peer.address.iter())
+                    .chain(state.discovered.get(id).into_iter().flatten())
+                {
+                    if !address.is_empty() && !addresses.contains(address) {
+                        addresses.push(address.clone());
+                    }
+                }
+                (id.clone(), addresses)
+            })
+            .collect()
+    }
+    fn discovered_peer(&self, id: &str, name: &str, platform: &str, addresses: Vec<String>) {
+        if id == self.identity.id
+            || id.len() != 32
+            || !id.bytes().all(|b| b.is_ascii_hexdigit())
+            || addresses.is_empty()
+        {
+            return;
+        }
+        let trusted = self.config.lock().unwrap().peers.contains_key(id);
+        let mut state = self.state.lock().unwrap();
+        if state.peers.len() >= 64 && !state.peers.contains_key(id) {
+            return;
+        }
+        state.discovered.insert(id.into(), addresses.clone());
+        // mDNS is only a hint. Never overwrite authenticated endpoint/metadata.
+        if let Some(peer) = state.peers.get_mut(id) {
+            if peer.public_key.is_none() {
+                peer.address = addresses[0].clone();
+                peer.device.name = name.chars().take(64).collect();
+                peer.device.platform = platform.chars().take(32).collect();
+            }
+        } else {
+            state.peers.insert(
+                id.into(),
+                PeerStatus {
+                    device: Device {
+                        id: id.into(),
+                        name: name.chars().take(64).collect(),
+                        platform: platform.chars().take(32).collect(),
+                        displays: vec![],
+                    },
+                    address: addresses[0].clone(),
+                    public_key: None,
+                    safety_code: None,
+                    trusted,
+                    connected: false,
+                    latency_ms: None,
+                    last_error: None,
+                },
+            );
+        }
+    }
     fn start_reconnect(self: &Arc<Self>) {
         let s = self.clone();
         tokio::spawn(async move {
             let mut stop = s.stop.subscribe();
+            if *stop.borrow() {
+                return;
+            }
             let mut tick = tokio::time::interval(Duration::from_secs(3));
             loop {
-                tokio::select! {_=stop.changed()=>break,_=tick.tick()=>{
-                    let peers={let c=s.config.lock().unwrap();let st=s.state.lock().unwrap();let mut candidates:BTreeMap<String,String>=c.peers.iter().filter_map(|(id,p)|p.address.clone().map(|a|(id.clone(),a))).collect();for(id,p)in &st.peers{candidates.insert(id.clone(),p.address.clone());}candidates.into_iter().filter(|(id,_)|id>&s.identity.id&&!st.peers.get(id).is_some_and(|p|p.connected)).collect::<Vec<_>>()};
-                    for(id,address)in peers{let result=s.connect(&address).await;if let Err(e)=result{let mut st=s.state.lock().unwrap();if let Some(p)=st.peers.get_mut(&id){p.last_error=Some(e.to_string());}}}
-                }}
+                tokio::select! {
+                    biased;
+                    _ = stop.changed() => break,
+                    _ = tick.tick() => {
+                        for (id, addresses) in s.reconnect_candidates() {
+                            if id < s.identity.id { continue; }
+                            for address in addresses {
+                                let result = tokio::select! {
+                                    biased;
+                                    _ = stop.changed() => return,
+                                    result = s.reconnect(&id, &address) => result,
+                                };
+                                match result {
+                                    Ok(()) => break,
+                                    Err(e) => if let Some(peer) = s.state.lock().unwrap().peers.get_mut(&id) { peer.last_error = Some(e.to_string()); },
+                                }
+                            }
+                        }
+                    }
+                }
             }
         });
+    }
+    fn advertise(&self, daemon: &mdns_sd::ServiceDaemon) -> Result<()> {
+        let local = self.state.lock().unwrap().local.clone();
+        let props = [
+            ("id", local.id.as_str()),
+            ("name", local.name.as_str()),
+            ("platform", local.platform.as_str()),
+        ];
+        let info = mdns_sd::ServiceInfo::new(
+            "_hoppingcursor._tcp.local.",
+            &local.id,
+            &format!("hop-{}.local.", local.id),
+            "",
+            self.listening_port,
+            &props[..],
+        )?
+        .enable_addr_auto();
+        daemon.register(info)?;
+        Ok(())
     }
     fn start_discovery(self: &Arc<Self>) {
         let daemon = match mdns_sd::ServiceDaemon::new() {
@@ -1421,26 +1608,9 @@ impl Service {
                 return;
             }
         };
-        let local = self.state.lock().unwrap().local.clone();
         let kind = "_hoppingcursor._tcp.local.";
-        let props = [
-            ("id", local.id.as_str()),
-            ("name", local.name.as_str()),
-            ("platform", local.platform.as_str()),
-        ];
-        match mdns_sd::ServiceInfo::new(
-            kind,
-            &local.id,
-            &format!("hop-{}.local.", local.id),
-            "",
-            self.listening_port,
-            &props[..],
-        )
-        .map(|i| i.enable_addr_auto())
-        .and_then(|i| daemon.register(i))
-        {
-            Ok(()) => {}
-            Err(e) => self.note(format!("Discovery advertisement: {e}")),
+        if let Err(error) = self.advertise(&daemon) {
+            self.note(format!("Discovery advertisement: {error}"));
         }
         let receiver = match daemon.browse(kind) {
             Ok(r) => r,
@@ -1452,15 +1622,21 @@ impl Service {
         let s = self.clone();
         tokio::spawn(async move {
             let mut stop = s.stop.subscribe();
+            if *stop.borrow() {
+                return;
+            }
+            let mut changed = s.metadata_changed.subscribe();
             loop {
-                tokio::select! {_=stop.changed()=>break,event=receiver.recv_async()=>match event{
+                tokio::select! {_=stop.changed()=>break,_=changed.changed()=>{
+                    if let Err(error) = s.advertise(&daemon) { s.note(format!("Discovery advertisement: {error}")); }
+                },event=receiver.recv_async()=>match event{
                     Ok(mdns_sd::ServiceEvent::ServiceResolved(info))=>{
                         let Some(id)=info.get_property_val_str("id")else{continue;};if id==s.identity.id||id.len()!=32{continue;}
-                        let Some(ip)=info.get_addresses().iter().find(|a|a.is_ipv4()&&local_ip(**a))else{continue;};let address=SocketAddr::new(*ip,info.get_port()).to_string();
-                        let trusted=s.config.lock().unwrap().peers.contains_key(id);let mut st=s.state.lock().unwrap();if st.peers.len()>=64&&!st.peers.contains_key(id){continue;}
-                        if let Some(p)=st.peers.get_mut(id){p.address=address;}else{
-                            st.peers.insert(id.into(),PeerStatus{device:Device{id:id.into(),name:info.get_property_val_str("name").unwrap_or("Nearby computer").chars().take(64).collect(),platform:info.get_property_val_str("platform").unwrap_or("unknown").chars().take(32).collect(),displays:vec![]},address,public_key:None,safety_code:None,trusted,connected:false,latency_ms:None,last_error:None});
-                        }
+                        if info.get_port() <= 1024 { continue; }
+                        let mut addresses = info.get_addresses().iter().filter(|ip| ip.is_ipv4() && local_ip(**ip) && !ip.is_loopback())
+                            .map(|ip| SocketAddr::new(*ip, info.get_port()).to_string()).collect::<Vec<_>>();
+                        addresses.sort(); addresses.truncate(8);
+                        s.discovered_peer(id, info.get_property_val_str("name").unwrap_or("Nearby computer"), info.get_property_val_str("platform").unwrap_or("unknown"), addresses);
                     },Ok(_)=>{},Err(_)=>break,
                 }}
             }
@@ -1471,6 +1647,9 @@ impl Service {
         let s = self.clone();
         tokio::spawn(async move {
             let mut stop = s.stop.subscribe();
+            if *stop.borrow() {
+                return;
+            }
             let mut last_revision = None;
             let mut tick = tokio::time::interval(Duration::from_millis(700));
             loop {
@@ -1485,6 +1664,29 @@ impl Service {
                 }}
             }
         });
+    }
+}
+fn migrate_display_ids(config: &mut Config, device_id: &str, aliases: &BTreeMap<String, String>) {
+    for layout in std::iter::once(&mut config.layout).chain(config.profiles.values_mut()) {
+        for entry in layout
+            .iter_mut()
+            .filter(|entry| entry.device_id == device_id)
+        {
+            if let Some(id) = aliases.get(&entry.display_id) {
+                entry.display_id = id.clone();
+            }
+        }
+        let mut seen = BTreeSet::new();
+        layout.retain(|entry| seen.insert((entry.device_id.clone(), entry.display_id.clone())));
+    }
+    for key in config
+        .hop_keys
+        .iter_mut()
+        .filter(|key| key.device_id == device_id)
+    {
+        if let Some(id) = aliases.get(&key.display_id) {
+            key.display_id = id.clone();
+        }
     }
 }
 pub(crate) fn filter_clipboard(
@@ -1519,10 +1721,78 @@ mod tests {
     use crate::platform::Headless;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    async fn start_test(
+        dir: PathBuf,
+        port: Option<u16>,
+        backend: Arc<dyn Platform>,
+    ) -> Result<Arc<Service>> {
+        Service::start_with_options(
+            dir,
+            port,
+            backend,
+            StartOptions {
+                discovery: false,
+                protect_identity: false,
+            },
+        )
+        .await
+    }
+    #[tokio::test]
+    async fn discovery_cannot_replace_verified_address_or_connect_unpaired_devices() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = start_test(dir.path().into(), Some(0), Arc::new(Headless::default()))
+            .await
+            .unwrap();
+        let peer_dir = tempfile::tempdir().unwrap();
+        let peer = Identity::from_config(&config::load(peer_dir.path()).unwrap()).unwrap();
+        let key = hex::encode(&peer.public);
+        service.discovered_peer(
+            &peer.id,
+            "Nearby",
+            "headless",
+            vec!["127.0.0.1:29999".into()],
+        );
+        assert!(
+            service.reconnect_candidates().is_empty(),
+            "Discovery must not start unrequested pairing handshakes"
+        );
+        service
+            .state
+            .lock()
+            .unwrap()
+            .peers
+            .get_mut(&peer.id)
+            .unwrap()
+            .public_key = Some(key.clone());
+        service.approve_peer(&peer.id, &key).unwrap();
+        {
+            let mut state = service.state.lock().unwrap();
+            let status = state.peers.get_mut(&peer.id).unwrap();
+            status.address = "127.0.0.1:28888".into();
+            status.connected = true;
+        }
+        service.discovered_peer(
+            &peer.id,
+            "Unverified rename",
+            "unknown",
+            vec!["127.0.0.1:27777".into()],
+        );
+        let snapshot = service.snapshot();
+        let status = snapshot
+            .peers
+            .iter()
+            .find(|p| p.device.id == peer.id)
+            .unwrap();
+        assert_eq!(status.address, "127.0.0.1:28888");
+        assert_eq!(status.device.name, "Nearby");
+        assert!(service.reconnect_candidates().is_empty());
+        service.shutdown();
+    }
+
     #[tokio::test]
     async fn native_capture_does_not_wait_for_configuration_writes() {
         let dir = tempfile::tempdir().unwrap();
-        let service = Service::start(dir.path().into(), Some(0), Arc::new(Headless::default()))
+        let service = start_test(dir.path().into(), Some(0), Arc::new(Headless::default()))
             .await
             .unwrap();
         let config_write = service.config.lock().unwrap();
@@ -1550,7 +1820,7 @@ mod tests {
     #[tokio::test]
     async fn emergency_release_bypasses_saturated_input_and_invalidates_stale_keys() {
         let dir = tempfile::tempdir().unwrap();
-        let service = Service::start(dir.path().into(), Some(0), Arc::new(Headless::default()))
+        let service = start_test(dir.path().into(), Some(0), Arc::new(Headless::default()))
             .await
             .unwrap();
         let (tx, mut normal) = mpsc::channel(1);
@@ -1560,6 +1830,7 @@ mod tests {
             "test-peer".into(),
             Channel {
                 generation: "test".into(),
+                preferred: true,
                 tx,
                 priority,
                 epoch: epoch.clone(),
@@ -1617,10 +1888,10 @@ mod tests {
         let da = tempfile::tempdir().unwrap();
         let db = tempfile::tempdir().unwrap();
         let backend_b = Arc::new(Headless::default());
-        let a = Service::start(da.path().into(), Some(0), Arc::new(Headless::default()))
+        let a = start_test(da.path().into(), Some(0), Arc::new(Headless::default()))
             .await
             .unwrap();
-        let b = Service::start(db.path().into(), Some(0), backend_b.clone())
+        let b = start_test(db.path().into(), Some(0), backend_b.clone())
             .await
             .unwrap();
         for (source, target) in [(&a, &b), (&b, &a)] {
@@ -1670,8 +1941,8 @@ mod tests {
         );
         let (ar, aw) = ca.unwrap().split();
         let (br, bw) = cb.unwrap().split();
-        a.start_control(b.identity.id.clone(), ar, aw);
-        b.start_control(a.identity.id.clone(), br, bw);
+        a.start_control(b.identity.id.clone(), ar, aw, true);
+        b.start_control(a.identity.id.clone(), br, bw, false);
         assert!(a.send(
             &b.identity.id,
             Message::Enter {

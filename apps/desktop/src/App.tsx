@@ -411,9 +411,9 @@ export default function App() {
                 </div>
                 <button
                   className="button secondary"
-                  onClick={() => setPage("diagnostics")}
+                  onClick={() => void run(() => call("request_input_permissions"), "Permission status refreshed. Approve the system prompts, then retry or restart if requested.")}
                 >
-                  View details
+                  Grant permissions / Retry
                 </button>
               </div>
             )}
@@ -451,8 +451,8 @@ export default function App() {
                   <div>
                     <small>Paired and connected</small>
                     <strong>
-                      {connected.length + 1} computer
-                      {connected.length === 0 ? "" : "s"}
+                      {connected.length} computer
+                      {connected.length === 1 ? "" : "s"}
                     </strong>
                   </div>
                 </div>

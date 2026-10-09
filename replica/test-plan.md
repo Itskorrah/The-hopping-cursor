@@ -5,7 +5,9 @@ offset/hidden topology, invalid layouts, safe filenames, actual two-service
 encrypted pairing and trust, acceptance/refusal, duplicate files and byte
 integrity, clipboard exchange, held-key handoff, emergency release, disconnect,
 revocation, quotas, and diagnostics exclusion. The suite currently contains
-28 Rust tests: 14 unit/security tests and 14 encrypted-network integration tests.
+33 Rust tests on macOS: 17 unit/security tests and 16 encrypted-network integration tests.
+Loopback services disable multicast; a separate opt-in two-service mDNS test
+checks untrusted discovery and rename refresh. Linux omits two OS-store migration tests.
 Additional regressions reject ciphertext tampering/replay, malformed/trailing
 messages, preserve fragmented reads during outbound traffic, bypass saturated
 queues for recovery, keep native callbacks responsive while configuration is
@@ -23,3 +25,9 @@ Not run on real hardware: native hooks, UIPI, macOS permissions/taps, clipboard
 HTML/PNG interoperability, mixed DPI, OS window drag/drop, tray behavior,
 sleep/wake/hotplug, long soak tests, end-to-end latency/throughput. See
 `docs/PLATFORM_TESTING.md` for actionable steps and pass criteria.
+
+2026-10-09 regressions cover verified-address preservation, trusted-only
+reconnect candidates, simultaneous control connections followed by verified file
+transfer, inbound address persistence, hotplug release/peer metadata refresh,
+profile reconciliation, and identity-migration success/failure. The native Mac
+app launched and its real Keychain migration preserved the public identity.

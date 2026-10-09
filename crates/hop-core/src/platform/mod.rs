@@ -13,7 +13,13 @@ pub type CaptureCallback = Arc<dyn Fn(CapturedEvent) -> bool + Send + Sync>;
 pub trait Platform: Send + Sync {
     fn name(&self) -> &str;
     fn displays(&self) -> Result<Vec<Display>>;
+    fn display_id_aliases(&self) -> Result<std::collections::BTreeMap<String, String>> {
+        Ok(Default::default())
+    }
     fn permissions(&self) -> Permissions;
+    fn request_permissions(&self) -> Permissions {
+        self.permissions()
+    }
     fn start_capture(&self, callback: CaptureCallback) -> Result<()>;
     fn stop_capture(&self);
     fn inject(&self, event: &InputEvent) -> Result<()>;
@@ -44,12 +50,16 @@ pub fn native() -> Arc<dyn Platform> {
 pub struct Headless {
     pub events: std::sync::Mutex<Vec<InputEvent>>,
     pub clipboard: std::sync::Mutex<Vec<ClipboardPart>>,
+    pub display_override: std::sync::Mutex<Option<Vec<Display>>>,
 }
 impl Platform for Headless {
     fn name(&self) -> &str {
         "headless"
     }
     fn displays(&self) -> Result<Vec<Display>> {
+        if let Some(displays) = self.display_override.lock().unwrap().clone() {
+            return Ok(displays);
+        }
         Ok(vec![Display {
             id: "headless-main".into(),
             name: "Headless test display".into(),
@@ -88,8 +98,8 @@ fn display_list() -> Result<Vec<Display>> {
     Ok(display_info::DisplayInfo::all()?
         .into_iter()
         .map(|d| Display {
-            id: format!("display-{}", d.id),
-            name: format!("Display {}", d.id),
+            id: windows_display_id(&d),
+            name: d.friendly_name.clone(),
             bounds: Rect {
                 x: d.x as f64,
                 y: d.y as f64,
@@ -100,4 +110,30 @@ fn display_list() -> Result<Vec<Display>> {
             primary: d.is_primary,
         })
         .collect())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_display_id(display: &display_info::DisplayInfo) -> String {
+    use sha2::{Digest, Sha256};
+    use windows_sys::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW};
+    let name = display
+        .name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let mut device: DISPLAY_DEVICEW = unsafe { std::mem::zeroed() };
+    device.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
+    if unsafe { EnumDisplayDevicesW(name.as_ptr(), 0, &mut device, 1) } != 0 {
+        let length = device
+            .DeviceID
+            .iter()
+            .position(|c| *c == 0)
+            .unwrap_or(device.DeviceID.len());
+        if length > 0 {
+            let path = String::from_utf16_lossy(&device.DeviceID[..length]).to_lowercase();
+            return format!("win-{}", hex::encode(Sha256::digest(path.as_bytes())));
+        }
+    }
+    // Virtual/driver-only displays may not expose a monitor interface path.
+    format!("display-{}", display.id)
 }

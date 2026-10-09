@@ -41,10 +41,10 @@ are not anonymous. Clipboard forwarding is enabled by default after deliberate
 pairing and can be disabled by type or peer; copied passwords are clipboard data
 too. Sensitive pasteboard flags and password-manager exclusion are future work.
 
-Private identity storage is local JSON with owner-only Unix permissions and
-the application-data directory's inherited Windows ACL. It is not yet backed
-by Keychain/DPAPI. Same-user malware can steal that key and local input; this
-application does not claim to protect a compromised endpoint. Diagnostic exports
+Native identities use Keychain/DPAPI as described below. Headless/test and legacy
+configurations use owner-only Unix files or inherited Windows ACLs. Same-user
+malware can access local input and process memory; this application does not
+claim to protect a compromised endpoint. Diagnostic exports
 exclude identity keys and content. Diagnostic messages can include device names
 and connection addresses: review before sharing them.
 
@@ -68,3 +68,21 @@ of Tauri's Linux GTK stack; this application currently distributes only Windows
 and macOS desktop packages. These warnings are recorded rather than globally
 suppressed. Track upstream Tauri/GTK migrations before adding Linux desktop
 support. A dependency scan does not constitute an application security audit.
+
+## Protected identity migration and discovery hardening (2026-10-09)
+
+Native startup migrates the same private key into a macOS Keychain generic
+password or a user-bound Windows DPAPI blob. The OS store is read back before
+atomically replacing the JSON with a reference and public key. Store failure
+leaves the original file intact; missing/locked/wrong-platform protected storage
+fails closed without creating a replacement identity. Config copies alone no
+longer suffice to restore native identities. Existing backups may still contain
+legacy keys. The key exists in process memory while the engine is running;
+Keychain/DPAPI does not defend against a compromised logged-in account.
+
+Discovery no longer initiates unrequested pairing or overwrites authenticated
+endpoint metadata. Reconnect uses paired identities only, tries remembered
+addresses before bounded discovery hints, and verifies the expected identity
+before exchanging introductions. Concurrent control connections converge on the
+one initiated by the lower identity; superseded tasks cannot mark its replacement
+disconnected. Bulk traffic still uses separate encrypted connections.

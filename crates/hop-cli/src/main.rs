@@ -18,6 +18,9 @@ enum Command {
         port: Option<u16>,
         #[arg(long)]
         connect: Option<String>,
+        /// Disable multicast discovery; remembered peers and manual addresses still work.
+        #[arg(long)]
+        no_discovery: bool,
     },
     /// Print the local public identity (never the private key).
     Identity,
@@ -49,7 +52,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(config::default_config_dir)?;
     match args.command {
         Command::Identity => {
-            let c = config::load(&dir)?;
+            let c = config::load_native(&dir)?;
             let id = config::Identity::from_config(&c)?;
             println!(
                 "Computer ID: {}\nPublic key: {}\nFingerprint: {}",
@@ -65,7 +68,7 @@ async fn main() -> Result<()> {
         } => {
             let key = decode_key(&public_key)?;
             anyhow::ensure!(key.len() == 32, "Public key must be 32 bytes");
-            let mut c = config::load(&dir)?;
+            let mut c = config::load_native(&dir)?;
             c.peers.insert(
                 config::device_id(&key),
                 hop_core::TrustedPeer {
@@ -80,8 +83,21 @@ async fn main() -> Result<()> {
             config::save(&dir, &c)?;
             println!("Trusted public key. Both computers must approve each other.");
         }
-        Command::Daemon { port, connect } => {
-            let service = Service::start(dir, port, platform::native()).await?;
+        Command::Daemon {
+            port,
+            connect,
+            no_discovery,
+        } => {
+            let service = Service::start_with_options(
+                dir,
+                port,
+                platform::native(),
+                hop_core::StartOptions {
+                    discovery: !no_discovery,
+                    protect_identity: true,
+                },
+            )
+            .await?;
             println!(
                 "Engine listening on TCP {}. Ctrl+C to quit.",
                 service.listening_port

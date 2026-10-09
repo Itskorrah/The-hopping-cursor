@@ -28,6 +28,41 @@ pub fn validate(layout: &[LayoutDisplay]) -> Result<()> {
     );
     Ok(())
 }
+/// Reconcile a freshly authenticated display list. Saved profiles keep their
+/// original contents; the active layout contains only currently attached screens.
+pub fn reconcile_device(layout: &mut Vec<LayoutDisplay>, device: &crate::model::Device) {
+    layout.retain(|entry| {
+        entry.device_id != device.id || device.displays.iter().any(|d| d.id == entry.display_id)
+    });
+    for display in &device.displays {
+        if !layout
+            .iter()
+            .any(|entry| entry.device_id == device.id && entry.display_id == display.id)
+        {
+            let x = layout
+                .iter()
+                .filter(|d| !d.hidden)
+                .map(|d| d.rect.x + d.rect.width)
+                .fold(0., f64::max);
+            layout.push(LayoutDisplay {
+                device_id: device.id.clone(),
+                display_id: display.id.clone(),
+                rect: Rect {
+                    x,
+                    y: 0.,
+                    width: display.bounds.width,
+                    height: display.bounds.height,
+                },
+                hidden: false,
+            });
+        }
+    }
+    if !layout.iter().any(|entry| !entry.hidden) {
+        if let Some(entry) = layout.iter_mut().find(|entry| entry.device_id == device.id) {
+            entry.hidden = false;
+        }
+    }
+}
 fn overlap(a: &Rect, b: &Rect) -> bool {
     a.x < b.x + b.width - 0.5
         && a.x + a.width > b.x + 0.5

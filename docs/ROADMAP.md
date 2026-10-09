@@ -9,10 +9,11 @@ that unfinished features currently work.
    Windows scaling, offset displays, held drags/modifiers, keyboard layouts,
    permission denial, disconnects, sleep, and multi-hour use. Fix failures before
    broadening the feature surface. Measure end-to-end latency and throughput.
-2. **Finish display/session reliability.** Refresh displays on hotplug, use
-   stable hardware monitor identifiers, reconcile saved profiles, refresh
-   discovery metadata on rename, and add a single-instance/open-existing-window
-   flow. Support controlled identity storage through Keychain/DPAPI.
+2. **Validate and finish display/session reliability.** Hotplug polling, monitor UUID/interface IDs, profile reconciliation, rename
+   advertisement refresh, single-instance reopening, and Keychain/DPAPI migration
+   are implemented. Validate on physical docks, identical monitors, virtual
+   displays, permission changes, locked Keychains, and Windows account recovery.
+   Cross-port identity persistence remains driver/hardware dependent.
 3. **Implement native file interoperability.** Bridge Explorer's OLE data
    objects/file lists and Finder's pasteboard/file promises to streamed transfers.
    Preserve recipient trust, explicit policy, duplicate protection, cancellation,

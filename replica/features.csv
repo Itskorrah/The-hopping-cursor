@@ -14,7 +14,7 @@ Clipboard files,files,should,yes,no,Native file pasteboard bridge pending
 Cursor lock,input,should,yes,partial,Edge-blocking toggle; native usage needs testing
 Game mode,input,should,yes,partial,Edge-blocking only; raw relative gaming input pending
 Hide displays,layout,should,yes,partial,Hidden displays excluded from routing; native held drags need validation
-Layout profiles,layout,should,yes,yes,Persistent named profiles and desktop controls
+Layout profiles,layout,should,yes,yes,Persistent named profiles; hotplug reconciliation and desktop controls
 Per-device permissions,security,should,yes,yes,Input clipboard and file permission controls
 Monitor hop shortcuts,input,should,yes,partial,Persistent physical-key chords and per-monitor desktop controls; protocol and UI tested; native hardware pending
 Idle display dimming,power,should,yes,no,Hardware brightness adapter pending
@@ -25,3 +25,6 @@ Signed installers,distribution,should,partial,no,Unsigned native CI packages; ce
 Windows and macOS builds,distribution,must,yes,yes,Windows x64 NSIS and Intel/Apple Silicon DMG builds succeeded on native CI runners
 Privacy-preserving diagnostics,diagnostics,should,yes,yes,No keys or content in exports; real RTT labelled accurately
 Consent by default,security,should,no,yes,Incoming files require approval unless deliberately disabled
+Display lifecycle,layout,must,yes,partial,Two-second hotplug refresh; Mac UUID and Windows monitor interface paths; physical dock testing pending
+Single instance,desktop,should,yes,partial,Second launch focuses existing window; native verification pending
+Protected identities,security,must,yes,partial,Keychain migration verified on Mac; DPAPI cross-compiled; Windows runtime validation pending

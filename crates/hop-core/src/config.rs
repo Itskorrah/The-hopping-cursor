@@ -13,6 +13,8 @@ pub const NOISE: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub private_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protected_identity: Option<ProtectedIdentity>,
     pub settings: Settings,
     pub peers: BTreeMap<String, TrustedPeer>,
     pub layout: Vec<LayoutDisplay>,
@@ -20,6 +22,12 @@ pub struct Config {
     pub profiles: BTreeMap<String, Vec<LayoutDisplay>>,
     #[serde(default)]
     pub hop_keys: Vec<HopKey>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ProtectedIdentity {
+    pub kind: String,
+    pub reference: String,
+    pub public_key: String,
 }
 pub struct Identity {
     pub private: Zeroizing<Vec<u8>>,
@@ -87,7 +95,19 @@ pub fn load(dir: &Path) -> Result<Config> {
     }
     let path = dir.join("config.json");
     if path.exists() {
-        let config: Config = serde_json::from_slice(&fs::read(path)?)?;
+        let mut config: Config = serde_json::from_slice(&fs::read(path)?)?;
+        if let Some(protected) = &config.protected_identity {
+            anyhow::ensure!(
+                Some(protected.kind.as_str()) == crate::identity_store::kind(),
+                "This identity requires its original operating system and user account"
+            );
+            let key = crate::identity_store::get(dir, &protected.reference)?;
+            config.private_key = hex::encode(&key);
+            anyhow::ensure!(
+                hex::encode(Identity::from_config(&config)?.public) == protected.public_key,
+                "Protected identity does not match the paired identity"
+            );
+        }
         config.settings.validate()?;
         Identity::from_config(&config)?;
         return Ok(config);
@@ -98,6 +118,7 @@ pub fn load(dir: &Path) -> Result<Config> {
         .unwrap_or_else(|| dir.join("Received"));
     let config = Config {
         private_key: hex::encode(kp.private),
+        protected_identity: None,
         settings: Settings {
             device_name: std::env::var("COMPUTERNAME")
                 .or_else(|_| std::env::var("HOSTNAME"))
@@ -113,6 +134,40 @@ pub fn load(dir: &Path) -> Result<Config> {
     save(dir, &config)?;
     Ok(config)
 }
+/// Atomically migrate an existing key, preserving its public identity and peers.
+pub fn load_native(dir: &Path) -> Result<Config> {
+    let config = load(dir)?;
+    protect_with(dir, config, |reference, key| {
+        crate::identity_store::put(dir, reference, key)?;
+        crate::identity_store::get(dir, reference)
+    })
+}
+fn protect_with(
+    dir: &Path,
+    mut config: Config,
+    store: impl FnOnce(&str, &[u8]) -> Result<Zeroizing<Vec<u8>>>,
+) -> Result<Config> {
+    if config.protected_identity.is_some() {
+        return Ok(config);
+    }
+    let Some(kind) = crate::identity_store::kind() else {
+        return Ok(config);
+    };
+    let identity = Identity::from_config(&config)?;
+    let reference = uuid::Uuid::new_v4().simple().to_string();
+    let recovered = store(&reference, &identity.private)?;
+    anyhow::ensure!(
+        *recovered == *identity.private,
+        "Protected identity read-back failed; original config preserved"
+    );
+    config.protected_identity = Some(ProtectedIdentity {
+        kind: kind.into(),
+        reference,
+        public_key: hex::encode(&identity.public),
+    });
+    save(dir, &config)?;
+    Ok(config)
+}
 pub fn save(dir: &Path, config: &Config) -> Result<()> {
     config.settings.validate()?;
     let tmp = dir.join(format!("config-{}.tmp", uuid::Uuid::new_v4()));
@@ -125,7 +180,13 @@ pub fn save(dir: &Path, config: &Config) -> Result<()> {
     }
     use std::io::Write;
     let mut f = opts.open(&tmp)?;
-    f.write_all(&serde_json::to_vec_pretty(config)?)?;
+    let mut disk = config.clone();
+    if disk.protected_identity.is_some() {
+        use zeroize::Zeroize;
+        disk.private_key.zeroize();
+        disk.private_key.clear();
+    }
+    f.write_all(&serde_json::to_vec_pretty(&disk)?)?;
     f.sync_all()?;
     drop(f);
     // Windows rename cannot replace an existing file; use backup rollback there.
@@ -152,4 +213,44 @@ pub fn save(dir: &Path, config: &Config) -> Result<()> {
     #[cfg(not(windows))]
     fs::rename(tmp, dir.join("config.json"))?;
     Ok(())
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+mod tests {
+    use super::*;
+    #[test]
+    fn protected_migration_preserves_identity_and_removes_plaintext_from_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = load(dir.path()).unwrap();
+        let public = Identity::from_config(&original).unwrap().public;
+        let protected = protect_with(dir.path(), original.clone(), |_, key| {
+            Ok(Zeroizing::new(key.to_vec()))
+        })
+        .unwrap();
+        assert_eq!(Identity::from_config(&protected).unwrap().public, public);
+        let disk: Config =
+            serde_json::from_slice(&fs::read(dir.path().join("config.json")).unwrap()).unwrap();
+        assert!(disk.private_key.is_empty());
+        assert!(disk.protected_identity.is_some());
+        assert!(!fs::read_to_string(dir.path().join("config.json"))
+            .unwrap()
+            .contains(&original.private_key));
+    }
+    #[test]
+    fn failed_identity_protection_preserves_original_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = load(dir.path()).unwrap();
+        let before = fs::read(dir.path().join("config.json")).unwrap();
+        assert!(
+            protect_with(dir.path(), original.clone(), |_, _| anyhow::bail!(
+                "Store unavailable"
+            ))
+            .is_err()
+        );
+        assert_eq!(fs::read(dir.path().join("config.json")).unwrap(), before);
+        assert!(
+            protect_with(dir.path(), original, |_, _| Ok(Zeroizing::new(vec![0; 32]))).is_err()
+        );
+        assert_eq!(fs::read(dir.path().join("config.json")).unwrap(), before);
+    }
 }

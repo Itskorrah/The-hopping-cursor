@@ -59,12 +59,16 @@ pub fn write(parts: &[ClipboardPart]) -> Result<()> {
         let rgba = match frame.color_type {
             png::ColorType::Rgba => bytes.to_vec(),
             png::ColorType::Rgb => bytes
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .flat_map(|p| [p[0], p[1], p[2], 255])
                 .collect(),
             png::ColorType::Grayscale => bytes.iter().flat_map(|v| [*v, *v, *v, 255]).collect(),
             png::ColorType::GrayscaleAlpha => bytes
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .flat_map(|v| [v[0], v[0], v[0], v[1]])
                 .collect(),
             _ => anyhow::bail!("Unsupported PNG format"),
