@@ -39,6 +39,9 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
 - Respect Mac concealed/transient/generated markers and Windows clipboard
   history/cloud exclusion flags; discard clipboard changes during a read.
   Unmarked sensitive content cannot be detected reliably.
+- Restrict native Mac URL reads with the documented file-URL-only option and
+  explicitly link AppKit's option constant. Missing pasteboards return an error.
+  CI repeats isolated native pasteboard checks to catch intermittent failures.
 - Ensure shutdown marks peers disconnected, rejects new manual connections,
   and aborts reader tasks even when stop precedes task scheduling.
 - Add a bounded parser fuzz harness with synthetic seeds and AddressSanitizer.

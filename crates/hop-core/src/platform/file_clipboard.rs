@@ -7,6 +7,10 @@ mod native {
     use super::*;
     use std::ffi::{c_void, CStr, CString};
     type Id = *mut c_void;
+    #[link(name = "AppKit", kind = "framework")]
+    extern "C" {
+        static NSPasteboardURLReadingFileURLsOnlyKey: Id;
+    }
     #[link(name = "objc")]
     extern "C" {
         fn objc_getClass(name: *const i8) -> Id;
@@ -47,6 +51,7 @@ mod native {
         read_board(board)
     }
     fn read_board(board: Id) -> Result<Vec<PathBuf>> {
+        anyhow::ensure!(!board.is_null(), "Native pasteboard is unavailable");
         unsafe {
             let classes = with(
                 objc_getClass(c"NSArray".as_ptr()),
@@ -55,11 +60,24 @@ mod native {
             );
             let read: unsafe extern "C" fn(Id, Id, Id, Id) -> Id =
                 std::mem::transmute(objc_msgSend as *const ());
+            let number: unsafe extern "C" fn(Id, Id, bool) -> Id =
+                std::mem::transmute(objc_msgSend as *const ());
+            let only_files = number(
+                objc_getClass(c"NSNumber".as_ptr()),
+                sel_registerName(c"numberWithBool:".as_ptr()),
+                true,
+            );
+            let options = read(
+                objc_getClass(c"NSDictionary".as_ptr()),
+                sel_registerName(c"dictionaryWithObject:forKey:".as_ptr()),
+                only_files,
+                NSPasteboardURLReadingFileURLsOnlyKey,
+            );
             let urls = read(
                 board,
                 sel_registerName(c"readObjectsForClasses:options:".as_ptr()),
                 classes,
-                std::ptr::null_mut(),
+                options,
             );
             let count: unsafe extern "C" fn(Id, Id) -> usize =
                 std::mem::transmute(objc_msgSend as *const ());
@@ -97,6 +115,7 @@ mod native {
         write_board(board, paths)
     }
     fn write_board(board: Id, paths: &[PathBuf]) -> Result<()> {
+        anyhow::ensure!(!board.is_null(), "Native pasteboard is unavailable");
         unsafe {
             let array = send(objc_getClass(c"NSMutableArray".as_ptr()), c"array");
             let string: unsafe extern "C" fn(Id, Id, *const i8) -> Id =
@@ -152,7 +171,17 @@ mod native {
                     .collect::<Vec<_>>();
                 write_board(board, &paths).unwrap();
                 let received = read_board(board).unwrap();
-                assert_eq!(received.len(), paths.len());
+                let count: unsafe extern "C" fn(Id, Id) -> usize =
+                    std::mem::transmute(objc_msgSend as *const ());
+                assert_eq!(
+                    received.len(),
+                    paths.len(),
+                    "Native pasteboard contains {} items",
+                    count(
+                        send(board, c"pasteboardItems"),
+                        sel_registerName(c"count".as_ptr())
+                    )
+                );
                 // NSURL decomposes Unicode even on normalization-preserving APFS.
                 // Verify that both paths identify the same actual file.
                 use std::os::unix::fs::MetadataExt;
