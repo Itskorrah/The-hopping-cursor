@@ -96,7 +96,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-The current suite has **42 Rust tests on macOS and 10 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. Two additional native Mac checks use isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
+The current suite has **42 Rust tests on macOS and 10 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
 
 Dependency audit results and remaining warnings are recorded in [docs/SECURITY.md](docs/SECURITY.md). The prioritized path from this alpha to a release is in [docs/ROADMAP.md](docs/ROADMAP.md); the research feature matrix is in [replica/features.csv](replica/features.csv).
 
@@ -134,7 +134,7 @@ cargo test --locked --test discovery -- --ignored
 
 Recovery also suspends input for unavailable displays/permissions and protected input sessions, and clears stale ownership/keys after timing gaps. This is safety recovery, not synchronized lock/wake control.
 
-A bounded AddressSanitizer parser fuzz run completed 1,770,886 cases without a crash; see [fuzz/README.md](fuzz/README.md) for scope and commands.
+A bounded AddressSanitizer parser fuzz run completed 5,299,006 cases in 181 seconds without a crash; see [fuzz/README.md](fuzz/README.md) for scope and commands.
 
 The CLI supports `daemon --no-discovery` for manual/remembered connections.
 See [docs/DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md) for detailed evidence.

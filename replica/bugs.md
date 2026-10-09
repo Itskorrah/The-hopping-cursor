@@ -69,6 +69,25 @@
 - Status: fixed in the session/clipboard hardening batch; original transfer
   completes byte-for-byte after duplicate rejection in the regression.
 
+### BUG-007: Mac file clipboard round-trip returns no files in CI
+
+- Severity: S2
+- Flow: explicit native file clipboard bridge
+- Build: 6dcbb2a; both macOS 14 ARM runner jobs (one builds the Intel package).
+- Steps: run the parallel native Rust suite; write two existing Unicode files
+  to a unique pasteboard and read them using the native adapter.
+- Expected: two paths referring to the original file identities.
+- Actual: successful write followed by zero read-back paths.
+- Evidence: run 37882551696 failed the same assertion in both Mac jobs. The
+  earlier CI run and 50 isolated / 12 complete local repetitions had passed.
+- Change: explicitly link AppKit's file-URL-reading constant, provide the
+  documented file-URL-only option, reject unavailable pasteboards, and retain
+  item-count diagnostics. The exact reason for the previous empty read has not
+  been independently isolated.
+- Status: regression now passes after 4b016e8; both Mac jobs in run 37883109120
+  pass the full suite and twenty repeated isolated checks each. Physical Finder
+  and cross-application validation remain required.
+
 ## To check on physical hardware
 
 OS permissions, hotplug/dock identities, native input, pasteboards, secure desktop,

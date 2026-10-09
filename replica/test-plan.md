@@ -40,7 +40,9 @@ bulk pressure with live control heartbeats, duplicate-ID consent isolation,
 shutdown cleanup, protected-session suspension,
 wake/timing-gap ownership cleanup, and all-displays-lost recovery. Two native Mac
 checks use isolated pasteboards for privacy flags and Unicode file identities.
-The bounded AddressSanitizer parser run executed 1,770,886 cases in 61 seconds
-without a crash/assertion (353 MiB peak RSS); see fuzz/README.md for reproduction.
+The longer bounded AddressSanitizer parser run executed 5,299,006 cases in 181
+seconds without a crash/assertion (549 MiB peak RSS); see fuzz/README.md for
+reproduction and the earlier Linux resource-cap failure. Mac CI also repeats
+both isolated pasteboard checks twenty times per job after BUG-007.
 This does not establish native injection, cross-app file paste, OS lock/wake
 synchronization, or exhaustive protocol security.

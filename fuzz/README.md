@@ -30,8 +30,10 @@ the case before each campaign. AddressSanitizer and its quarantine remain
 enabled; no finding is suppressed. See [libFuzzer's resource flags](https://llvm.org/docs/LibFuzzer.html#options)
 and [AddressSanitizer's quarantine settings](https://github.com/google/sanitizers/wiki/AddressSanitizerFlags).
 
-On Apple Silicon macOS, the 2026-10-09 run executed 1,770,886 cases in 61 seconds
-under AddressSanitizer, with no crash/assertion and peak RSS 353 MiB. This is a
-short parser smoke campaign, not exhaustive protocol, native-adapter, or
+On Apple Silicon macOS, a 2026-10-09 run executed 5,299,006 cases in 181 seconds
+under AddressSanitizer, with no crash/assertion and peak RSS 549 MiB. An earlier
+61-second run passed 1,770,886 cases at 353 MiB. Linux CI also passed the retained
+single-input replay at the original 512 MiB cap and a 61-second campaign with
+5,930,511 cases at 588 MiB. These are short parser smoke campaigns, not exhaustive protocol, native-adapter, or
 cryptographic assurance. Continue longer campaigns and independent review before
 production distribution.

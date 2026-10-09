@@ -59,8 +59,8 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
   pasteboards, including Unicode filesystem identities; the user's clipboard
   is not replaced by these tests. Finder/Explorer destination behavior still
   needs cross-application acceptance testing.
-- A 61-second AddressSanitizer parser campaign executed 1,770,886 cases without
-  a crash/assertion, peak RSS 353 MiB. This is a bounded smoke campaign.
+- A 181-second AddressSanitizer parser campaign executed 5,299,006 cases without
+  a crash/assertion, peak RSS 549 MiB. This is a bounded smoke campaign.
 - The separate two-service multicast discovery/rename test passes on this LAN.
 - Strict Clippy passes for Apple Silicon, Intel Mac, and Windows x64 core/CLI.
   Cross-compilation verifies types and API declarations; it is not Windows or
@@ -72,7 +72,9 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
   the private key from the real JSON config. The last native window check reported
   missing input permission; the request button was exercised. Cross-computer
   input was not tested. The updated bundle builds locally; a later native window
-  check was blocked because the Mac was locked.
+  check was blocked because the Mac was locked. After it became accessible,
+  restarting the updated bundle appeared to await a macOS security approval;
+  that dialog requires human action before current window checks can proceed.
 
 ## Native CI evidence
 
@@ -83,6 +85,16 @@ real user-bound DPAPI round-trip/tamper/non-overwrite and a disposable-runner
 CF_HDROP clipboard round-trip. These do not prove physical input or Explorer
 paste behavior. The package notice inventory was subsequently regenerated for
 new native dependencies and is checked by CI before packaging.
+The later parser replay/campaign and repeated native clipboard checks are
+recorded in fuzz/README.md and replica/bugs.md; historical CI runs should be
+distinguished from the current branch's Actions results.
+
+[Run 37883109120](https://github.com/Itskorrah/The-hopping-cursor/actions/runs/37883109120)
+passed all five jobs on 2bc01a4, including the refreshed notices and both Mac
+clipboard repetitions. Its Mac jobs both ran on ARM hosts; the Intel artifact
+was cross-compiled. CI now selects macOS 15 ARM and macOS 15 Intel runners
+explicitly to exercise both native ABIs and avoid the retiring macOS 14 image.
+Runner labels follow [GitHub's supported architectures](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 
 ## Still required
 

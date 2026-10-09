@@ -57,3 +57,10 @@ Replayed its saved synthetic input successfully, preserved it as a decoder test
 and corpus seed, and retained an explicit 512 MiB single-input replay in CI.
 Campaigns use libFuzzer's bounded 2048 MiB default budget without reducing
 AddressSanitizer coverage or quarantine. Details are in fuzz/README.md.
+
+The longer local campaign passed 5,299,006 inputs in 181 seconds. Mac CI then
+exposed an empty file-URL read-back on both ARM runner jobs. Added explicit
+AppKit linkage and file-URL-only read options; both jobs now pass twenty isolated
+clipboard repetitions plus the full suite. BUG-007 records the evidence and
+remaining uncertainty about the original empty read. The latest local app
+launch appears to await a native macOS security approval.
