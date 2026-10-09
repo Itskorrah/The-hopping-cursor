@@ -88,6 +88,13 @@ jobs:
       - run: npm ci
       - run: cargo clippy --locked -p hop-core -p hopping-cursor --all-targets --target ${{ matrix.target }} -- -D warnings
       - run: cargo test --locked -p hop-core
+      - name: Repeat isolated native Mac pasteboard checks
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for hop_attempt in {1..20}; do
+            cargo test --locked -p hop-core --lib mac_ || exit 1
+          done
       - name: Exercise file clipboard on disposable Windows runner
         if: runner.os == 'Windows'
         run: cargo test --locked -p hop-core windows_file_clipboard_round_trip -- --ignored
