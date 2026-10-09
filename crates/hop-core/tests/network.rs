@@ -911,7 +911,7 @@ async fn duplicate_incoming_offer_cannot_replace_pending_consent() {
     let (mut reader, mut writer) = connection.split();
     writer
         .send(&Message::Hello {
-            version: 1,
+            version: 2,
             device: p.a.snapshot().local,
             purpose: "data".into(),
             port: p.a.listening_port,
@@ -1130,4 +1130,358 @@ async fn wake_recovery_clears_ownership_and_pressed_modifier_state() {
             .contains(&InputEvent::ReleaseAll)
     })
     .await;
+}
+
+#[tokio::test]
+async fn shared_arrangement_requires_acceptance_and_routes_both_directions() {
+    let p = pair_with_displays(true, Some(pc_displays())).await;
+    let layout = p.a.snapshot().layout;
+    assert_ne!(p.b.snapshot().layout, layout);
+    assert_eq!(p.a.share_layout().unwrap(), 1);
+    wait(|| !p.b.snapshot().layout_offers.is_empty()).await;
+    assert_ne!(
+        p.b.snapshot().layout,
+        layout,
+        "A peer must not silently overwrite local work"
+    );
+    p.b.accept_layout(&p.a.snapshot().local.id).unwrap();
+    assert_eq!(p.b.snapshot().layout, layout);
+    let a = p.a.snapshot().local;
+    let b = p.b.snapshot().local;
+    p.b.jump_to_display(&a.id, &a.displays[0].id).unwrap();
+    wait(|| {
+        p.pa.events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, InputEvent::Move { .. }))
+    })
+    .await;
+    assert!(p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(p.b.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 4,
+        down: true
+    })));
+    wait(|| {
+        p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 4,
+            down: true,
+        })
+    })
+    .await;
+    p.b.release();
+    wait(|| p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    assert!(!p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+    // Reclaim the other physical mouse, then use its keyboard on the PC.
+    p.a.capture(CapturedEvent::Move {
+        x: 100.,
+        y: 100.,
+        dx: 2.,
+        dy: 0.,
+    });
+    p.a.jump_to_display(&b.id, "primary").unwrap();
+    wait(|| !p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    assert!(p.a.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 5,
+        down: true
+    })));
+    wait(|| {
+        p.pb.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 5,
+            down: true,
+        })
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn departed_cursor_hides_idle_peer_and_its_keyboard_follows_focus() {
+    let p = pair(true).await;
+    let a = p.a.snapshot().local;
+    let b = p.b.snapshot().local;
+    p.a.jump_to_display(&b.id, &b.displays[0].id).unwrap();
+    wait(|| p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    p.a.release();
+    wait(|| p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    p.pa.events.lock().unwrap().clear();
+    assert!(p.b.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 6,
+        down: true
+    })));
+    wait(|| {
+        p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 6,
+            down: true,
+        })
+    })
+    .await;
+    assert_eq!(p.b.snapshot().active_device, a.id);
+    assert!(p.b.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 6,
+        down: false
+    })));
+    wait(|| {
+        p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 6,
+            down: false,
+        })
+    })
+    .await;
+    p.b.capture(CapturedEvent::Move {
+        x: 100.,
+        y: 100.,
+        dx: 1.,
+        dy: 0.,
+    });
+    wait(|| p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    assert!(!p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+    p.a.shutdown();
+    wait(|| !p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+}
+
+#[tokio::test]
+async fn automatic_file_clipboard_publishes_verified_batch_without_echo() {
+    let p = pair(true).await;
+    for s in [&p.a, &p.b] {
+        let mut settings = s.snapshot().settings;
+        settings.clipboard_files = true;
+        s.settings(settings).unwrap();
+    }
+    let paths = vec![p._a.path().join("one.txt"), p._a.path().join("two.txt")];
+    for path in &paths {
+        tokio::fs::write(path, b"verified copied file")
+            .await
+            .unwrap();
+    }
+    *p.pa.file_clipboard.lock().unwrap() = paths;
+    wait(|| p.pb.file_clipboard.lock().unwrap().len() == 2).await;
+    let copied = p.pb.file_clipboard.lock().unwrap().clone();
+    for path in copied {
+        assert_eq!(
+            tokio::fs::read(path).await.unwrap(),
+            b"verified copied file"
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(1600)).await;
+    assert_eq!(
+        p.b.snapshot().transfers.len(),
+        2,
+        "Received files must not bounce back"
+    );
+    assert!(p
+        .a
+        .snapshot()
+        .transfers
+        .iter()
+        .all(|t| t.direction == "outgoing"));
+}
+
+#[tokio::test]
+async fn file_clipboard_consent_preserves_a_newer_recipient_clipboard() {
+    let p = pair(false).await;
+    for s in [&p.a, &p.b] {
+        let mut settings = s.snapshot().settings;
+        settings.clipboard_files = true;
+        s.settings(settings).unwrap();
+    }
+    let path = p._a.path().join("copied.txt");
+    tokio::fs::write(&path, b"safe").await.unwrap();
+    *p.pa.file_clipboard.lock().unwrap() = vec![path];
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.state == "offered")
+    })
+    .await;
+    let newer = p._b.path().join("newer.txt");
+    tokio::fs::write(&newer, b"new choice").await.unwrap();
+    *p.pb.file_clipboard.lock().unwrap() = vec![newer.clone()];
+    let id =
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .find(|t| t.state == "offered")
+            .unwrap()
+            .id
+            .clone();
+    p.b.respond_transfer(&id, true).unwrap();
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.id == id && t.state == "complete")
+    })
+    .await;
+    assert_eq!(*p.pb.file_clipboard.lock().unwrap(), vec![newer]);
+}
+
+#[tokio::test]
+async fn physical_controller_takeover_does_not_echo_leave_to_new_owner() {
+    let p = pair(true).await;
+    let a = p.a.snapshot().local;
+    let b = p.b.snapshot().local;
+    p.a.jump_to_display(&b.id, &b.displays[0].id).unwrap();
+    wait(|| p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    wait(|| {
+        p.pb.events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, InputEvent::Move { .. }))
+    })
+    .await;
+    p.b.capture(CapturedEvent::Move {
+        x: 100.,
+        y: 100.,
+        dx: 1.,
+        dy: 0.,
+    });
+    wait(|| p.a.snapshot().controller_device == b.id && p.a.snapshot().active_device == b.id).await;
+    p.b.jump_to_display(&a.id, &a.displays[0].id).unwrap();
+    wait(|| {
+        p.b.snapshot().active_device == a.id
+            && !p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    p.pa.events.lock().unwrap().clear();
+    assert!(p.b.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 7,
+        down: true
+    })));
+    wait(|| {
+        p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 7,
+            down: true,
+        })
+    })
+    .await;
+    // Physical keys on the destination must not cancel the inbound mouse lease.
+    assert!(!p.a.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 8,
+        down: true
+    })));
+    assert!(p.b.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 9,
+        down: true
+    })));
+    wait(|| {
+        p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 9,
+            down: true,
+        })
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn shared_keyboard_disconnect_releases_synthetic_keys_and_emergency_claims_cursor() {
+    let p = pair(true).await;
+    let a = p.a.snapshot().local;
+    let b = p.b.snapshot().local;
+    p.a.jump_to_display(&b.id, &b.displays[0].id).unwrap();
+    wait(|| p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    p.a.release();
+    wait(|| p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    assert!(p.b.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 224,
+        down: true
+    })));
+    wait(|| {
+        p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 224,
+            down: true,
+        })
+    })
+    .await;
+    p.b.release();
+    wait(|| p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    assert!(!p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+    // Return focus to a, then hold a key using b's idle keyboard and disconnect.
+    p.a.capture(CapturedEvent::Move {
+        x: 100.,
+        y: 100.,
+        dx: 1.,
+        dy: 0.,
+    });
+    wait(|| p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst)).await;
+    p.pa.events.lock().unwrap().clear();
+    assert!(p.b.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 225,
+        down: true
+    })));
+    wait(|| {
+        p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 225,
+            down: true,
+        })
+    })
+    .await;
+    p.pa.events.lock().unwrap().clear();
+    p.b.shutdown();
+    wait(|| {
+        p.pa.events
+            .lock()
+            .unwrap()
+            .contains(&InputEvent::ReleaseAll)
+    })
+    .await;
+    assert!(!p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(p.a.snapshot().active_device, a.id);
+}
+
+#[tokio::test]
+async fn later_file_copy_wins_when_consent_is_answered_out_of_order() {
+    let p = pair(false).await;
+    for service in [&p.a, &p.b] {
+        let mut settings = service.snapshot().settings;
+        settings.clipboard_files = true;
+        service.settings(settings).unwrap();
+    }
+    let old = p._a.path().join("old.txt");
+    let new = p._a.path().join("new.txt");
+    tokio::fs::write(&old, b"old").await.unwrap();
+    tokio::fs::write(&new, b"new").await.unwrap();
+    *p.pa.file_clipboard.lock().unwrap() = vec![old];
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.name == "old.txt" && t.state == "offered")
+    })
+    .await;
+    *p.pa.file_clipboard.lock().unwrap() = vec![new];
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.name == "new.txt" && t.state == "offered")
+    })
+    .await;
+    let transfers = p.b.snapshot().transfers;
+    let newest = transfers.iter().find(|t| t.name == "new.txt").unwrap();
+    p.b.respond_transfer(&newest.id, true).unwrap();
+    wait(|| {
+        p.pb.file_clipboard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.file_name().unwrap() == "new.txt")
+    })
+    .await;
+    let oldest = transfers.iter().find(|t| t.name == "old.txt").unwrap();
+    p.b.respond_transfer(&oldest.id, true).unwrap();
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.id == oldest.id && t.state == "complete")
+    })
+    .await;
+    assert_eq!(p.pb.file_clipboard.lock().unwrap().len(), 1);
+    assert_eq!(
+        p.pb.file_clipboard.lock().unwrap()[0].file_name().unwrap(),
+        "new.txt"
+    );
 }

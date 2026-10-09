@@ -176,3 +176,31 @@ notices, hashes and build provenance. Missing CRT PDB warnings affect debugging
 symbols; the compile/link/package completed. Windows native runtime checks and
 physical input acceptance have not run for this cross-build. It is unsigned;
 production distribution remains unfinished. See [build steps](BUILDING.md).
+
+## 0.1.2 shared desk — 2026-10-09
+
+Physical user feedback for **0.1.1**: Mac trackpad → Windows, typing, Enter and
+text copy/paste were useful and fairly smooth. Windows physical mouse/keyboard
+→ Mac failed, and the Windows pointer remained visible after returning to Mac.
+The prior automated routing test did not exercise Windows' clipped native mouse
+motion. No exact OS root cause was remotely reproduced on the PC.
+
+**0.1.2** adds a Windows Raw Input sink, dedicated parking-window cursor ownership,
+authenticated focus coordination, idle-keyboard routing, accepted layout sharing
+and opt-in verified file clipboard batches. A new regression exposed that urgent
+Leave invalidation discarded a queued focus announcement; reordering fixes it.
+New-controller Enter no longer echoes Leave back to its sender. Disconnects clear
+synthetic shared keys, and physical keys on the destination preserve its inbound
+mouse lease. Clipboard checks cover consent, echo, batch supersession and newer
+recipient clipboard preservation. UI adds honest controller/destination/visibility
+state and native chrome conventions.
+
+Local verification: **54 Rust tests (21 unit / 33 encrypted integration)**,
+**13 Playwright browser tests**, TypeScript/Vite, strict core/CLI Clippy on
+Apple Silicon, Intel Mac and Windows x64, Rustfmt and parser harness compile pass.
+Dedicated multicast discovery remains an ignored separate check; no new parser
+fuzz campaign or end-to-end latency benchmark was performed for this pass.
+Windows native runtime is not exercised by cross-checks. The release checklist
+in TEST_0.1.2.md is still pending. Native edge file dragging, folders/promises,
+privileged desktops, signed production distribution and external review remain
+unfinished. This branch is for controlled test delivery and is not merged into main.

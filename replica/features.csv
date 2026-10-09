@@ -3,14 +3,14 @@ Encrypted transport,security,must,yes,yes,Noise XX frames; integration tested; e
 Explicit authenticated pairing,security,must,yes,yes,Compare full code and approve both sides; pinning and revocation tested
 Automatic discovery,network,must,yes,yes,mDNS plus manual private IP; physical isolated-network testing pending
 Reconnect and recovery,network,must,yes,yes,Heartbeat watchdog; integration recovery and held keys tested
-Edge cursor hopping,input,must,yes,partial,0.1.1 native geometry and local-only OS transitions; source cursor lifecycle; physical three-screen retest pending
-Keyboard sharing and modifier mapping,input,must,yes,partial,HID mapping and unmapped source-key suppression; OS behavior and international layouts need hardware tests
-Multiple display arrangement,layout,must,yes,partial,Offset stacked hidden and reversed enumeration tested; primary labels and OS-order repair; configure both computers; physical retest pending
+Edge cursor hopping,input,must,yes,partial,0.1.2 Raw Input edge motion and coordinated cursor focus; controller takeover regressions; physical retest pending
+Keyboard sharing and modifier mapping,input,must,yes,partial,HID mapping and idle-peer keyboards following focus; disconnect cleanup tested; native and international layout tests pending
+Multiple display arrangement,layout,must,yes,partial,Offset stacked hidden and reversed enumeration tested; primary labels and OS-order repair; explicit accepted arrangement sharing; physical retest pending
 Clipboard text,clipboard,must,yes,partial,Real encrypted exchange tested with memory adapter; OS pasteboard tests pending
 Clipboard images and formatting,clipboard,should,yes,partial,PNG/HTML adapters compile; cross-app OS tests pending
 File transfers with progress,files,must,yes,yes,Encrypted streaming acceptance SHA-256 quotas and non-overwrite tested
 Native edge file drag,files,must,yes,no,App-window drag/drop works; Explorer/Finder cross-edge dragging not implemented
-Clipboard files,files,should,yes,partial,Explicit Finder URLs and Explorer CF_HDROP actions through consented transfer; Mac isolated round-trip tested; automatic sync and physical cross-app checks pending
+Clipboard files,files,should,yes,partial,Explicit Finder URLs and Explorer CF_HDROP actions through consented transfer; Mac isolated round-trip and opt-in verified automatic batches tested; newer-copy preservation; physical cross-app checks pending
 Cursor lock,input,should,yes,partial,Edge-blocking toggle; native usage needs testing
 Game mode,input,should,yes,partial,Edge-blocking only; raw relative gaming input pending
 Hide displays,layout,should,yes,partial,Hidden displays excluded from routing; native held drags need validation

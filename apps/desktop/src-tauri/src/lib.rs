@@ -63,6 +63,18 @@ fn save_layout(engine: State<'_, Engine>, layout: Vec<LayoutDisplay>) -> Result<
     engine.set_layout(layout).map_err(|e| e.to_string())
 }
 #[tauri::command]
+fn share_layout(engine: State<'_, Engine>) -> Result<usize, String> {
+    engine.share_layout().map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn accept_layout(engine: State<'_, Engine>, peer: String) -> Result<(), String> {
+    engine.accept_layout(&peer).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn dismiss_layout(engine: State<'_, Engine>, peer: String) {
+    engine.dismiss_layout(&peer);
+}
+#[tauri::command]
 fn approve_peer(engine: State<'_, Engine>, id: String, public_key: String) -> Result<(), String> {
     engine
         .approve_peer(&id, &public_key)
@@ -154,7 +166,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![send_copied_files,copy_received_file,request_input_permissions,snapshot,update_settings,save_layout,approve_peer,forget_peer,peer_permissions,connect_address,send_files,respond_transfer,cancel_transfer,release_input,export_diagnostics,save_profile,load_profile,delete_profile,set_hop_key,jump_to_display])
+        .invoke_handler(tauri::generate_handler![share_layout,accept_layout,dismiss_layout,send_copied_files,copy_received_file,request_input_permissions,snapshot,update_settings,save_layout,approve_peer,forget_peer,peer_permissions,connect_address,send_files,respond_transfer,cancel_transfer,release_input,export_diagnostics,save_profile,load_profile,delete_profile,set_hop_key,jump_to_display])
         .setup(|app|{
             let engine=tauri::async_runtime::block_on(Service::start(hop_core::config::default_config_dir()?,None,hop_core::platform::native()))?;app.manage(engine);
             let open=MenuItem::with_id(app,"open","Open The Hopping Cursor",true,None::<&str>)?;

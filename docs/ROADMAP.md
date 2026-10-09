@@ -16,8 +16,8 @@ that unfinished features currently work.
    Cross-port identity persistence remains driver/hardware dependent.
 3. **Finish native file interoperability.** Explicit Explorer CF_HDROP / Finder
    file-URL clipboard actions now use consented streamed transfers. Validate these
-   across applications, then add automatic file-clipboard synchronization,
-   Explorer OLE drag objects and Finder file promises with real OS drag lifecycles.
+   across applications, opt-in automatic verified file batches now have encrypted integration checks.
+   Next add Explorer OLE drag objects and Finder file promises with real OS drag lifecycles.
    Preserve recipient trust, explicit policy, duplicate protection, cancellation,
    and temporary cleanup. Test OS drag lifecycle and destination applications;
    app-window drops alone do not satisfy native edge dragging or file clipboard.

@@ -24,6 +24,7 @@ const sample: Snapshot = {
     clipboard_text: true,
     clipboard_images: true,
     clipboard_html: true,
+    clipboard_files: false,
     map_modifiers: true,
     auto_accept_files: false,
     receive_directory: "/Users/you/Downloads/Hopping Cursor",
@@ -82,6 +83,7 @@ const sample: Snapshot = {
       hidden: false,
     },
   ],
+  layout_offers: [],
   profiles: [],
   hop_keys: [],
   peer_permissions: {
@@ -95,11 +97,13 @@ const sample: Snapshot = {
     explanation: "Sample permissions in interface preview",
   },
   active_device: "local-preview",
+  controller_device: "local-preview",
+  cursor_visible: true,
   listening_port: 24810,
   diagnostics: [
     "Interface preview loaded. No native input, network, or file sharing is running.",
   ],
-  version: "0.1.1",
+  version: "0.1.2",
   session_available: true,
 };
 let preview: Snapshot;
@@ -109,6 +113,8 @@ try {
 } catch {
   preview = structuredClone(sample);
 }
+preview.layout_offers ??= [];
+preview.settings.clipboard_files ??= false;
 preview.profiles ??= [];
 preview.hop_keys ??= [];
 preview.peer_permissions ??= {};
@@ -131,6 +137,20 @@ export async function call<T = void>(
     case "update_settings":
       preview.settings = args.settings as Settings;
       preview.local.name = preview.settings.device_name;
+      break;
+    case "share_layout":
+      return 1 as T;
+    case "accept_layout": {
+      const offer = preview.layout_offers.find((o) => o.peer_id === args.peer);
+      if (!offer) throw new Error("Arrangement offer expired");
+      preview.layout = offer.layout;
+      preview.layout_offers = preview.layout_offers.filter((o) => o !== offer);
+      break;
+    }
+    case "dismiss_layout":
+      preview.layout_offers = preview.layout_offers.filter(
+        (o) => o.peer_id !== args.peer,
+      );
       break;
     case "save_layout": {
       const layout = args.layout as LayoutDisplay[];

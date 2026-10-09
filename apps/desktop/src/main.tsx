@@ -6,6 +6,9 @@ import "@fontsource/dm-sans/600.css";
 import "@fontsource/dm-sans/700.css";
 import App from "./App";
 import "./styles.css";
+document.documentElement.dataset.native = String(
+  "__TAURI_INTERNALS__" in window,
+);
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

@@ -168,3 +168,46 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
 - Cause: sending Leave and Enter on the same peer plus unconditional ReleaseAll.
 - Change: keep the same peer lease and held state across monitor transitions.
 - Status: failing-before/passing-after encrypted regression retained; hardware retest pending.
+
+### BUG-013: Idle destination retains a cursor after return
+
+- Severity: S2
+- Evidence: user physical report on 0.1.1, Mac→Windows trial.
+- Actual: Windows pointer stays at its edge after the cursor returns to Mac.
+- Change: protocol 2 communicates cursor focus to peers; idle recipients hide
+  through the native adapter. Windows uses a non-activating parking window,
+  without overwriting global cursor themes. Recovery restores it.
+- Status: automated ownership regression passes; physical Windows rendering and
+  ordinary application cursor compatibility still need 0.1.2 acceptance.
+
+### BUG-014: Windows physical control cannot enter Mac
+
+- Severity: S1, physical acceptance open.
+- Evidence: user reports failure in the 0.1.1 three-screen trial.
+- Finding: Windows capture derives motion from clipped pointer coordinates;
+  layouts were independently saved. Neither is remotely established as the sole
+  cause on this PC.
+- Change: Raw Input deltas continue at the edge; explicit arrangement sharing
+  lets the recipient apply the same geometry. Both app versions must be 0.1.2.
+- Status: both-direction encrypted engine regressions and Windows strict compile
+  pass; real Windows hooks/Mac injection acceptance is pending. No production merge.
+
+### BUG-015: Physical takeover loses focus announcement
+
+- Severity: S2
+- Reproduction: encrypted integration test starts control, then moves the
+  destination's physical mouse to reclaim it.
+- Actual: urgent Leave advances the queue epoch and invalidates the earlier
+  normal-queue CursorFocus, leaving the previous source visible.
+- Fix: send focus after priority release; expose controller/destination state.
+  Do not echo Leave to a new controller during Enter.
+- Status: failing-before/passing-after regression; native counterpart pending.
+
+### BUG-016: Pending copied-file offers can replace newer clipboard choices
+
+- Severity: S2
+- Scope: newly added opt-in automatic file clipboard.
+- Tests: edit recipient clipboard during consent; answer old/new file offers
+  out of order. Publish only a complete verified latest batch, and preserve
+  newer recipient revisions. Hash verified local paths to prevent echo.
+- Status: encrypted integration tests pass; physical Finder/Explorer checks pending.

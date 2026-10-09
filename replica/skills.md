@@ -22,3 +22,15 @@ for `nodnarbnitram/claude-code-extensions@tauri-v2` (7.6K directory installs,
 Applied its IPC/state/capability guidance and checked native API choices against
 Tauri, Apple SDK headers, and Microsoft documentation. Used the Vercel React
 best-practices checklist for UI edits. Skills do not establish OS correctness.
+
+2026-10-09 shared-desk pass: reviewed the user-linked AgenticSkills find-skills
+page and upstream Vercel SKILL.md; searched `windows input`, `rust concurrency`
+and `native desktop`. No specialized Rust concurrency result was found. Reviewed
+`yetone/native-feel-skill` (1,930 GitHub stars / 563 directory installs at review)
+and installed its MIT-licensed SKILL.md, philosophy, conventions and ship audit.
+Skills CLI cloning failed with a connection reset; selected text files were
+retrieved through the GitHub contents API, without running repository scripts.
+Applied platform fonts/chrome/cursor and status clarity guidance. Its architecture
+opinions are not grounds to replace this existing Tauri/Rust application. Native
+motion, clipboard and drag choices were checked against Microsoft/Apple docs.
+No skill establishes physical input behavior or release readiness.

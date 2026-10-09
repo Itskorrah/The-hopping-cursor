@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::{
     collections::BTreeSet,
     sync::{
-        atomic::{AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex, OnceLock,
     },
     thread::JoinHandle,
@@ -12,15 +12,20 @@ use std::{
 use windows_sys::Win32::{
     Foundation::*,
     System::LibraryLoader::GetModuleHandleW,
-    UI::{Input::KeyboardAndMouse::*, WindowsAndMessaging::*},
+    UI::{
+        Input::{KeyboardAndMouse::*, *},
+        WindowsAndMessaging::*,
+    },
 };
+static CURSOR_WINDOW: AtomicUsize = AtomicUsize::new(0);
+static CURSOR_HIDDEN: AtomicBool = AtomicBool::new(false);
+const CURSOR_UPDATE: u32 = WM_APP + 1;
 static CALLBACK: OnceLock<Mutex<Option<CaptureCallback>>> = OnceLock::new();
 pub struct Windows {
     thread_id: AtomicU32,
     thread: Mutex<Option<JoinHandle<()>>>,
     held: Mutex<BTreeSet<u16>>,
     buttons: Mutex<BTreeSet<u8>>,
-    cursor: Mutex<Option<usize>>,
     suppressed: Arc<AtomicU64>,
 }
 impl Windows {
@@ -37,7 +42,6 @@ impl Windows {
             thread: Mutex::new(None),
             held: Mutex::new(BTreeSet::new()),
             buttons: Mutex::new(BTreeSet::new()),
-            cursor: Mutex::new(None),
             suppressed: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -69,15 +73,13 @@ unsafe extern "system" fn mouse_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
         let m = &*(l as *const MSLLHOOKSTRUCT);
         if m.flags & LLMHF_INJECTED == 0 {
             let event = match w as u32 {
+                // Hardware motion is handled by WM_INPUT so screen clipping
+                // cannot erase outward movement. Never forward it twice.
                 WM_MOUSEMOVE => {
-                    let mut current = POINT { x: 0, y: 0 };
-                    GetCursorPos(&mut current);
-                    Some(CapturedEvent::Move {
-                        x: m.pt.x as f64,
-                        y: m.pt.y as f64,
-                        dx: (m.pt.x - current.x) as f64,
-                        dy: (m.pt.y - current.y) as f64,
-                    })
+                    if CURSOR_HIDDEN.load(Ordering::SeqCst) {
+                        return 1;
+                    }
+                    None
                 }
                 WM_LBUTTONDOWN | WM_LBUTTONUP => Some(CapturedEvent::Input(InputEvent::Button {
                     button: 0,
@@ -105,15 +107,94 @@ unsafe extern "system" fn mouse_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
                 })),
                 _ => None,
             };
-            if event.is_some_and(callback) {
-                if w as u32 == WM_MOUSEMOVE {
-                    SetCursor(std::ptr::null_mut());
-                }
+            let consumed = event.is_some_and(callback);
+            // A physical click reclaiming this computer must remove the parking
+            // window before Windows chooses the recipient of that click.
+            if !CURSOR_HIDDEN.load(Ordering::SeqCst) {
+                update_cursor_window();
+            }
+            if consumed {
                 return 1;
             }
         }
     }
     CallNextHookEx(std::ptr::null_mut(), code, w, l)
+}
+// A tiny non-activating parking window owns its cursor. This avoids changing
+// global cursor themes or relying on another application's WM_SETCURSOR state.
+unsafe fn update_cursor_window() {
+    let hwnd = CURSOR_WINDOW.load(Ordering::SeqCst) as HWND;
+    if hwnd.is_null() {
+        return;
+    }
+    if CURSOR_HIDDEN.load(Ordering::SeqCst) {
+        if IsWindowVisible(hwnd) == 0 {
+            let mut point = POINT { x: 0, y: 0 };
+            if GetCursorPos(&mut point) != 0 {
+                SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    point.x - 1,
+                    point.y - 1,
+                    3,
+                    3,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+                SetCursorPos(point.x, point.y);
+                SetCursor(std::ptr::null_mut());
+            }
+        }
+    } else {
+        ShowWindow(hwnd, SW_HIDE);
+        SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_ARROW));
+    }
+}
+unsafe extern "system" fn input_window(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+    match message {
+        CURSOR_UPDATE => {
+            update_cursor_window();
+            return 0;
+        }
+        WM_MOUSEACTIVATE => return MA_NOACTIVATE as LRESULT,
+        WM_SETCURSOR if CURSOR_HIDDEN.load(Ordering::SeqCst) => {
+            SetCursor(std::ptr::null_mut());
+            return 1;
+        }
+        WM_INPUT => {
+            let mut raw: RAWINPUT = std::mem::zeroed();
+            let mut size = std::mem::size_of::<RAWINPUT>() as u32;
+            let n = GetRawInputData(
+                l as HRAWINPUT,
+                RID_INPUT,
+                &mut raw as *mut _ as _,
+                &mut size,
+                std::mem::size_of::<RAWINPUTHEADER>() as u32,
+            );
+            if n != u32::MAX
+                && n >= std::mem::size_of::<RAWINPUTHEADER>() as u32
+                && raw.header.dwType == RIM_TYPEMOUSE
+                && !raw.header.hDevice.is_null()
+            {
+                let mouse = raw.data.mouse;
+                if mouse.usFlags & MOUSE_MOVE_ABSOLUTE == 0
+                    && (mouse.lLastX != 0 || mouse.lLastY != 0)
+                {
+                    let mut point = POINT { x: 0, y: 0 };
+                    if GetCursorPos(&mut point) != 0 {
+                        callback(CapturedEvent::Move {
+                            x: point.x as f64,
+                            y: point.y as f64,
+                            dx: mouse.lLastX as f64,
+                            dy: mouse.lLastY as f64,
+                        });
+                        update_cursor_window();
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    DefWindowProcW(hwnd, message, w, l)
 }
 impl Platform for Windows {
     fn name(&self) -> &str {
@@ -174,9 +255,42 @@ impl Platform for Windows {
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || unsafe {
             let module = GetModuleHandleW(std::ptr::null());
+            let class: Vec<u16> = "HoppingCursorInputSink\0".encode_utf16().collect();
+            let mut wc: WNDCLASSW = std::mem::zeroed();
+            wc.lpfnWndProc = Some(input_window);
+            wc.hInstance = module;
+            wc.lpszClassName = class.as_ptr();
+            RegisterClassW(&wc);
+            let hwnd = CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                class.as_ptr(),
+                class.as_ptr(),
+                WS_POPUP,
+                0,
+                0,
+                3,
+                3,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                module,
+                std::ptr::null(),
+            );
+            let raw = RAWINPUTDEVICE {
+                usUsagePage: 1,
+                usUsage: 2,
+                dwFlags: RIDEV_INPUTSINK,
+                hwndTarget: hwnd,
+            };
+            let raw_ok = !hwnd.is_null()
+                && RegisterRawInputDevices(&raw, 1, std::mem::size_of::<RAWINPUTDEVICE>() as u32)
+                    != 0;
+            if !hwnd.is_null() {
+                SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
+                CURSOR_WINDOW.store(hwnd as usize, Ordering::SeqCst);
+            }
             let keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), module, 0);
             let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), module, 0);
-            if keyboard.is_null() || mouse.is_null() {
+            if keyboard.is_null() || mouse.is_null() || !raw_ok {
                 let _ = tx.send(Err("Windows input hook installation failed".to_string()));
             } else {
                 let mut msg: MSG = std::mem::zeroed();
@@ -187,6 +301,21 @@ impl Platform for Windows {
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
+            }
+            CURSOR_HIDDEN.store(false, Ordering::SeqCst);
+            update_cursor_window();
+            CURSOR_WINDOW.store(0, Ordering::SeqCst);
+            if raw_ok {
+                let remove = RAWINPUTDEVICE {
+                    usUsagePage: 1,
+                    usUsage: 2,
+                    dwFlags: RIDEV_REMOVE,
+                    hwndTarget: std::ptr::null_mut(),
+                };
+                RegisterRawInputDevices(&remove, 1, std::mem::size_of::<RAWINPUTDEVICE>() as u32);
+            }
+            if !hwnd.is_null() {
+                DestroyWindow(hwnd);
             }
             if !keyboard.is_null() {
                 UnhookWindowsHookEx(keyboard);
@@ -224,21 +353,14 @@ impl Platform for Windows {
         }
     }
     fn set_forwarding(&self, forwarding: bool) -> Result<()> {
-        let mut previous = self.cursor.lock().unwrap();
-        unsafe {
-            if forwarding && previous.is_none() {
-                let mut info: CURSORINFO = std::mem::zeroed();
-                info.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
+        CURSOR_HIDDEN.store(forwarding, Ordering::SeqCst);
+        let hwnd = CURSOR_WINDOW.load(Ordering::SeqCst) as HWND;
+        if !hwnd.is_null() {
+            unsafe {
                 anyhow::ensure!(
-                    GetCursorInfo(&mut info) != 0,
-                    "Cannot read source cursor state"
+                    PostMessageW(hwnd, CURSOR_UPDATE, 0, 0) != 0,
+                    "Cannot update cursor visibility"
                 );
-                *previous = Some(info.hCursor as usize);
-                SetCursor(std::ptr::null_mut());
-            } else if !forwarding {
-                if let Some(cursor) = previous.take() {
-                    SetCursor(cursor as HCURSOR);
-                }
             }
         }
         Ok(())

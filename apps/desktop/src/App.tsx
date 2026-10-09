@@ -358,7 +358,7 @@ export default function App() {
               </h1>
               <p>
                 {page === "workspace"
-                  ? "One mouse and keyboard. Room to move."
+                  ? "Use either mouse. Your keyboards follow the shared cursor."
                   : page === "computers"
                     ? "Discover, pair, and manage the computers on your local network."
                     : page === "transfers"
@@ -399,6 +399,17 @@ export default function App() {
             <div className="notice danger" role="alert">
               {failure}
               <button onClick={() => void refresh()}>Retry</button>
+            </div>
+          )}
+          {page !== "workspace" && (data.layout_offers || []).length > 0 && (
+            <div className="notice" role="status">
+              A paired computer sent a screen arrangement.
+              <button
+                className="text-button"
+                onClick={() => setPage("workspace")}
+              >
+                Review arrangement
+              </button>
             </div>
           )}
           {native && !data.session_available && (
@@ -822,6 +833,34 @@ export default function App() {
                       <dd>{data.suppressed_events}</dd>
                     </div>
                   )}
+                  <div>
+                    <dt>Mouse controller</dt>
+                    <dd>
+                      {data.controller_device === data.local.id
+                        ? data.local.name
+                        : data.peers.find(
+                            (p) => p.device.id === data.controller_device,
+                          )?.device.name || "This computer"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Cursor destination</dt>
+                    <dd>
+                      {data.active_device === data.local.id
+                        ? data.local.name
+                        : data.peers.find(
+                            (p) => p.device.id === data.active_device,
+                          )?.device.name || "Unavailable"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Local cursor</dt>
+                    <dd>
+                      {data.cursor_visible === false
+                        ? "Hidden while input is elsewhere"
+                        : "Visible"}
+                    </dd>
+                  </div>
                   <div>
                     <dt>Listening port</dt>
                     <dd>TCP {data.listening_port}</dd>
@@ -1321,6 +1360,12 @@ function Preferences({
           change={() => change({ clipboard_images: !s.clipboard_images })}
         />
         <Toggle
+          label="File clipboard"
+          description="Copy regular files in Finder or Explorer, accept them on the other computer, then paste. Enable on both computers. Newer clipboard contents are preserved; zip folders first."
+          on={s.clipboard_files}
+          change={() => change({ clipboard_files: !s.clipboard_files })}
+        />
+        <Toggle
           label="Translate Command and Control"
           description="Use familiar shortcuts when moving between Mac and Windows."
           on={s.map_modifiers}
@@ -1598,8 +1643,8 @@ function Arrangement({
           <h2>Arrange your displays</h2>
           <p>
             Place screens like they sit on your desk. Touching edges let your
-            cursor cross. For control in both directions, set the same
-            arrangement on each computer.
+            cursor cross. Save here, then share the arrangement and apply it on
+            the other computer for control in both directions.
           </p>
         </div>
         <button className="button secondary" onClick={add}>
@@ -1607,6 +1652,57 @@ function Arrangement({
           Add computer
         </button>
       </div>
+      {(data.layout_offers || []).map((offer) => (
+        <div className="notice" key={offer.peer_id} role="status">
+          <div>
+            <strong>
+              Arrangement from{" "}
+              {data.peers.find((p) => p.device.id === offer.peer_id)?.device
+                .name || "paired computer"}
+            </strong>
+            <p>
+              {offer.layout.length} displays. Applying replaces the saved
+              positions for these two computers.
+            </p>
+            <p>
+              {offer.layout
+                .map(
+                  (l) =>
+                    `${data.local.id === l.device_id ? data.local.name : data.peers.find((p) => p.device.id === l.device_id)?.device.name || "Computer"}: ${l.rect.x}, ${l.rect.y}${l.hidden ? " (hidden)" : ""}`,
+                )
+                .join(" · ")}
+            </p>
+            {dirty && (
+              <p>Save or reset your edits before applying this arrangement.</p>
+            )}
+          </div>
+          <button
+            className="button secondary"
+            disabled={dirty || saving}
+            onClick={() =>
+              void action(
+                "accept_layout",
+                { peer: offer.peer_id },
+                "Shared arrangement applied",
+              )
+            }
+          >
+            Apply arrangement
+          </button>
+          <button
+            className="text-button"
+            onClick={() =>
+              void action(
+                "dismiss_layout",
+                { peer: offer.peer_id },
+                "Arrangement dismissed",
+              )
+            }
+          >
+            Dismiss
+          </button>
+        </div>
+      ))}
       <div className="canvas-toolbar">
         <span>
           <span className="status-dot" />
@@ -1615,6 +1711,26 @@ function Arrangement({
         </span>
         <div>
           {dirty && <Badge tone="warning">Unsaved changes</Badge>}
+          <button
+            className="text-button"
+            disabled={
+              dirty ||
+              saving ||
+              data.settings.paused ||
+              !data.peers.some(
+                (p) => p.connected && data.peer_permissions[p.device.id]?.input,
+              )
+            }
+            onClick={() =>
+              void action(
+                "share_layout",
+                {},
+                "Arrangement sent. Apply it in Workspace on the other computer.",
+              )
+            }
+          >
+            Share arrangement
+          </button>
           <button className="text-button" onClick={useNativeOrder}>
             Use OS display order
           </button>

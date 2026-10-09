@@ -93,3 +93,14 @@ notarization and physical peer control still remain gaps.
   package locally, check archive/architecture/version and exact bundled bytes
   accounting only for Tauri's NSIS marker, and publish the private test release
   v0.1.1-test.1. Physical duplicate-input and two-way Windows acceptance remain open.
+
+2026-10-09 — 0.1.2: Windows Raw Input motion sink and cursor parking window;
+authenticated coordinated cursor focus; idle keyboard routing; physical-controller
+reclaim; no echoed Leave to a new controller; ownership announcement after urgent
+queue invalidation. Accepted arrangement sharing protects saved local work.
+Opt-in native copied-file batches use consented verified streams, prevent bounce
+and preserve newer clipboard edits. Diagnostics identify controller/destination;
+UI gains arrangement review/file clipboard and native chrome conventions.
+54 Rust / 13 browser checks pass; native runtime retest is pending. Native
+Finder/Explorer edge drag, folders/file promises, measured latency, signing and
+production updates remain unfinished. See docs/TEST_0.1.2.md.

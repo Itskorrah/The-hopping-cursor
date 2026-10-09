@@ -109,3 +109,22 @@ addresses before bounded discovery hints, and verifies the expected identity
 before exchanging introductions. Concurrent control connections converge on the
 one initiated by the lower identity; superseded tasks cannot mark its replacement
 disconnected. Bulk traffic still uses separate encrypted connections.
+
+### Protocol 2 and copied-file batches
+
+0.1.2 requires protocol 2 on both computers. Authenticated focus and idle-keyboard
+messages are gated by local input permission and session availability. Layout
+proposals validate known displays, dimensions, duplicate IDs and overlaps; they
+cannot write settings until the recipient applies them. Focus messages carry
+public computer IDs, not input contents. Shared-key state is cleared on recovery
+and peer disconnect and is never exported.
+
+File clipboard synchronization is opt-in. A sender requires file and clipboard
+permission, limits each batch to 100 regular files and rejects symlinks/folders
+for automatic sending. Each incoming file retains ordinary explicit consent
+unless the receiver deliberately enabled auto-accept. Native clipboard publication
+requires the entire verified batch, current permissions and an unchanged recipient
+clipboard. Newer batches supersede older pending ones. Temporary partial files
+retain cleanup; completed downloads remain normal received files. This implements
+copy only, never source deletion or shell move feedback. Physical Finder/Explorer,
+OS clipboard races and independent security review remain acceptance work.

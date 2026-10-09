@@ -1773,3 +1773,28 @@ progress {
     width: 100%;
   }
 }
+
+/* Desktop chrome follows the platform; browser preview keeps its web styling. */
+:root[data-native="true"] {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI",
+    sans-serif;
+  -webkit-touch-callout: none;
+}
+[data-native="true"] button {
+  cursor: default;
+}
+[data-native="true"] .sidebar,
+[data-native="true"] .page-heading,
+[data-native="true"] .canvas-toolbar,
+[data-native="true"] .display-card {
+  user-select: none;
+}
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .button:active:not(:disabled) {
+    transform: none;
+  }
+}

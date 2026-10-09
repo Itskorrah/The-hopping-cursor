@@ -13,13 +13,13 @@ A desktop application for sharing a mouse, keyboard, clipboard, and files betwee
 - Edge-based cursor routing with offset/stacked displays, coordinate scaling, hidden displays, configurable edge delay, sensitivity, and per-monitor hop shortcuts.
 - Windows hooks/SendInput and macOS CGEventTap/CGEventPost adapters; keyboard forwarding, common physical-key mapping, mouse buttons/scroll, injected-event filtering, held-key handoff, and Ctrl+Alt+Escape emergency recovery.
 - Plain text, HTML, and PNG clipboard exchange on separate encrypted bulk connections, type controls, per-peer permissions, bounce suppression, and source clipboard privacy-marker checks.
-- Streamed file transfers, app-window drag/drop, recipient approval, progress, cancellation, SHA-256 verification, duplicate-name protection, quotas, and bounded concurrency. Explicit “Send copied files” and “Copy file for pasting” actions bridge native file lists without trusting remote paths.
+- Streamed file transfers, app-window drag/drop, recipient approval, progress, cancellation, SHA-256 verification, duplicate-name protection, quotas, and bounded concurrency. Opt-in file clipboard synchronization and explicit “Send copied files” / “Copy file for pasting” actions bridge native file lists without trusting remote paths.
 - Desktop pairing, draggable/keyboard-accessible layout editor, saved layout profiles, hotplug refresh, stable macOS UUID / Windows monitor interface identifiers, single-instance window reopening, computer management, transfers, preferences, diagnostics, and tray controls. Cursor lock and basic edge-blocking game mode.
 - Windows NSIS and Intel/Apple Silicon macOS DMG installers and build workflow in GitHub Actions. Windows packages are unsigned; Mac bundles use ad hoc signatures without Developer ID or notarization. Build success is not evidence of physical two-computer validation.
 
 ## What's still missing
 
-Native Finder/Explorer file dragging across screen edges, automatic file-clipboard synchronization and folder/file-promise support; hardware display dimming; synchronized lock/wake/session state; raw relative gaming input; secure desktop/UAC/login input on Windows; media/vendor keys; code signing/notarization; measured latency/throughput and external security review. There is no commercial license/billing system in this alpha.
+Native Finder/Explorer file dragging across screen edges, folder/file-promise support; hardware display dimming; synchronized lock/wake/session state; raw relative gaming input; secure desktop/UAC/login input on Windows; media/vendor keys; code signing/notarization; measured latency/throughput and external security review. There is no commercial license/billing system in this alpha.
 
 The research is in [replica/recon.md](replica/recon.md). Native limitations and acceptance steps are in [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md). Security design and trust boundaries are in [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -44,7 +44,7 @@ ID signing is still needed for dependable permission continuity and distribution
 
 1. Open Computers on both machines. Discovery uses mDNS; if needed, use Add computer with a local address such as `192.168.1.20:24810`.
 2. Pair the computer, compare the **entire safety code** on both screens, and approve it on **both**. One-sided approval does not permit sharing.
-3. Arrange your displays with touching edges and save. Each computer currently keeps its own layout; configure both if you want to drive from either side.
+3. Arrange your displays with touching edges and save. Click **Share arrangement**, then review and **Apply arrangement** in Workspace on the other computer. Sharing never silently replaces its saved layout.
 4. Move toward a shared edge. Your keyboard follows the cursor. Use **Ctrl+Alt+Escape** on the source computer to bring input back immediately.
 5. Send files from File transfers or drop them into the app window. The receiver accepts the offer. Completed files go to the receiving folder in Preferences. To send files copied in Finder/Explorer, use **Send copied files**. A verified received file offers **Copy file for pasting** into another folder.
 
@@ -114,7 +114,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-The current suite has **47 Rust tests on macOS and 11 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
+The current suite has **54 Rust tests on macOS and 13 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
 
 Dependency audit results and remaining warnings are recorded in [docs/SECURITY.md](docs/SECURITY.md). The prioritized path from this alpha to a release is in [docs/ROADMAP.md](docs/ROADMAP.md); the research feature matrix is in [replica/features.csv](replica/features.csv).
 
@@ -192,3 +192,38 @@ version resources pass verification. It is unsigned and still needs Windows
 installation/native input testing; the repair has not been merged into main.
 The ZIP includes update instructions, license, notices and build metadata.
 No paid runners or billing changes were used.
+
+## Shared-desk update (0.1.2, 2026-10-09)
+
+Both apps must use **0.1.2**. Protocol 2 adds authenticated cursor focus,
+idle-keyboard forwarding and explicit arrangement offers. Old protocol 1 apps
+are rejected; pairings and layouts are retained. The latest test installer is
+[Windows 0.1.2](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.2-test.1).
+This is a test prerelease on `codex/exclusive-input-routing`, not a production release.
+
+Windows reads hardware mouse deltas through Raw Input so motion continues at a
+clipped screen edge. Hooks still suppress ordinary source clicks/keys. A tiny
+non-activating parking window owns the hidden Windows cursor without changing
+system cursor themes. Peers coordinate cursor visibility when entering, leaving,
+switching physical mice and recovering. Keyboards on idle peers follow the
+shared destination; moving a physical mouse or clicking reclaims that computer.
+Diagnostics show the controller, destination and intended local cursor visibility.
+These state checks cannot prove what a physical Windows desktop renders.
+
+Enable **Preferences → File clipboard** on both computers to copy 1–100 regular
+files in Finder/Explorer, accept their transfer, then paste them on the other OS.
+Files are fully downloaded and verified before native clipboard publication.
+Existing quotas, per-peer file **and** clipboard permissions, recipient consent,
+copy-only semantics, duplicate-name protection and cancellation remain in force.
+Newer clipboard edits are preserved; superseded batches do not replace newer
+copies. This can require a wait before pasting large files. Folders, file promises,
+cut/move semantics and cross-screen native dragging are still unsupported.
+
+54 Rust tests, 13 browser tests, strict Clippy for Windows and both Mac targets,
+Rustfmt, frontend build and parser harness compile checks pass locally.
+User-reported 0.1.1 Mac→Windows trackpad/typing/Enter/text copy-paste worked;
+Windows→Mac and the stationary Windows cursor did not. The 0.1.2 changes need a
+fresh physical retest, including permission continuity and high-DPI motion.
+See [the update checklist](docs/TEST_0.1.2.md) and
+[native drag research](docs/NATIVE_DRAG_DESIGN.md). No new latency benchmark or
+Windows secure-desktop support is claimed.

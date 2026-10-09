@@ -209,3 +209,59 @@ test("display shortcuts can be assigned", async ({ page }) => {
   await page.getByRole("button", { name: "Jump here" }).click();
   await expect(page.getByText("Input moved to the display")).toBeVisible();
 });
+
+test("file clipboard is opt-in and persists", async ({ page }) => {
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  const toggle = page.getByRole("switch", {
+    name: "File clipboard",
+    exact: true,
+  });
+  await expect(toggle).not.toBeChecked();
+  await toggle.click();
+  await page.reload();
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await expect(toggle).toBeChecked();
+  await expect(
+    page.getByText(/Newer clipboard contents are preserved/),
+  ).toBeVisible();
+});
+
+test("shared layout review preserves unsaved edits and requires applying", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await page.evaluate(() => {
+    const key = "hopping-cursor-interface-preview-v1";
+    const state = JSON.parse(localStorage.getItem(key)!);
+    state.layout_offers = [
+      {
+        peer_id: "pc-preview",
+        layout: state.layout.map((l: { rect: { y: number } }) => ({
+          ...l,
+          rect: { ...l.rect, y: 300 },
+        })),
+      },
+    ];
+    localStorage.setItem(key, JSON.stringify(state));
+  });
+  await page.reload();
+  await expect(page.getByText("Arrangement from Design PC")).toBeVisible();
+  const screen = page.getByRole("button", { name: /Arrange Studio Mac/ });
+  await screen.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    page.getByRole("button", { name: "Apply arrangement" }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await page.getByRole("button", { name: "Apply arrangement" }).click();
+  await expect(page.getByText("Shared arrangement applied")).toBeVisible();
+  const saved = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("hopping-cursor-interface-preview-v1")!),
+  );
+  expect(
+    saved.layout.every((l: { rect: { y: number } }) => l.rect.y === 300),
+  ).toBe(true);
+  expect(saved.layout_offers).toEqual([]);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
