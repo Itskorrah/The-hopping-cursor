@@ -31,6 +31,9 @@ pub(crate) struct State {
     pub diagnostics: Vec<String>,
     active: Option<Active>,
     inbound: Option<String>,
+    away: Option<(String, String)>,
+    layout_offers: BTreeMap<String, Vec<LayoutDisplay>>,
+    shared_keys: BTreeMap<String, BTreeSet<u16>>,
     pressed: BTreeSet<u16>,
     consumed: BTreeSet<u16>,
     local_position: (f64, f64),
@@ -103,6 +106,8 @@ pub struct Service {
     pub(crate) stop: watch::Sender<bool>,
     pub(crate) outgoing_bulk: tokio::sync::Semaphore,
     incoming_bulk: tokio::sync::Semaphore,
+    pub(crate) file_clipboard_hash: Mutex<Vec<u8>>,
+    pub(crate) file_batches: Mutex<BTreeMap<String, crate::transfer::FileBatch>>,
     pub(crate) incoming_transfers: Mutex<BTreeSet<String>>,
     clipboard_retry: AtomicBool,
     pub(crate) session_available: AtomicBool,
@@ -202,6 +207,9 @@ impl Service {
                 diagnostics: vec![],
                 active: None,
                 inbound: None,
+                away: None,
+                layout_offers: BTreeMap::new(),
+                shared_keys: BTreeMap::new(),
                 pressed: BTreeSet::new(),
                 consumed: BTreeSet::new(),
                 local_position: initial_position,
@@ -219,6 +227,8 @@ impl Service {
             incoming_bulk: tokio::sync::Semaphore::new(4),
             incoming_transfers: Mutex::new(BTreeSet::new()),
             clipboard_retry: AtomicBool::new(false),
+            file_clipboard_hash: Mutex::new(Vec::new()),
+            file_batches: Mutex::new(BTreeMap::new()),
             session_available: AtomicBool::new(session_available),
             input_available: AtomicBool::new(input_available),
             displays_available: AtomicBool::new(true),
@@ -284,6 +294,14 @@ impl Service {
             settings: c.settings.clone(),
             peers: s.peers.values().cloned().collect(),
             layout: c.layout.clone(),
+            layout_offers: s
+                .layout_offers
+                .iter()
+                .map(|(id, layout)| LayoutOffer {
+                    peer_id: id.clone(),
+                    layout: layout.clone(),
+                })
+                .collect(),
             profiles: c.profiles.keys().cloned().collect(),
             hop_keys: c.hop_keys.clone(),
             peer_permissions: c
@@ -306,10 +324,21 @@ impl Service {
                 .active
                 .as_ref()
                 .map(|a| a.peer.clone())
+                .or_else(|| s.away.as_ref().map(|(_, target)| target.clone()))
                 .unwrap_or_else(|| s.local.id.clone()),
+            controller_device: if s.active.is_some() {
+                s.local.id.clone()
+            } else {
+                s.inbound
+                    .clone()
+                    .or_else(|| s.away.as_ref().map(|(owner, _)| owner.clone()))
+                    .unwrap_or_else(|| s.local.id.clone())
+            },
+            cursor_visible: s.active.is_none() && s.away.is_none(),
             listening_port: self.listening_port,
             diagnostics: s.diagnostics.clone(),
             version: env!("CARGO_PKG_VERSION").into(),
+            suppressed_events: self.backend.suppressed_events(),
             session_available: self.session_available.load(Ordering::SeqCst),
         }
     }
@@ -330,7 +359,11 @@ impl Service {
             "Receiving folder must be an absolute path"
         );
         let should_release = settings.paused;
-        let renamed = self.routing.load().settings.device_name != settings.device_name;
+        let previous = self.routing.load();
+        if previous.settings.clipboard_files != settings.clipboard_files {
+            self.file_clipboard_hash.lock().unwrap().clear();
+        }
+        let renamed = previous.settings.device_name != settings.device_name;
         let mut c = self.config.lock().unwrap();
         let mut next = c.clone();
         next.settings = settings;
@@ -526,6 +559,11 @@ impl Service {
             return_x: return_position.0,
             return_y: return_position.1,
         });
+        if let Err(e) = self.sync_forwarding() {
+            self.release();
+            return Err(e.context("Cannot suppress local input"));
+        }
+        self.announce_focus(device_id);
         if !self.send(
             device_id,
             Message::Enter {
@@ -633,12 +671,15 @@ impl Service {
         Ok(())
     }
     pub fn release(&self) {
-        let (active, inbound) = {
+        let (active, inbound, away) = {
             let mut s = self.state.lock().unwrap();
             s.edge = None;
-            (s.active.take(), s.inbound.take())
+            let away = s.away.take().is_some();
+            s.shared_keys.clear();
+            (s.active.take(), s.inbound.take(), away)
         };
         let active_was_remote = active.is_some();
+        let _ = self.sync_forwarding();
         if let Some(a) = active {
             self.send(&a.peer, Message::Leave);
             let _ = self.backend.inject(&InputEvent::Move {
@@ -646,8 +687,12 @@ impl Service {
                 y: a.return_y,
             });
         }
+        let had_inbound = inbound.is_some();
         if let Some(id) = inbound {
             self.send(&id, Message::Leave);
+        }
+        if active_was_remote || had_inbound || away {
+            self.announce_focus(&self.identity.id);
         }
         let _ = self.backend.inject(&InputEvent::ReleaseAll);
         if active_was_remote {
@@ -660,11 +705,19 @@ impl Service {
         self.backend.stop_capture();
         self.decisions.lock().unwrap().clear();
     }
+    fn sync_forwarding(&self) -> Result<()> {
+        // Serialize cursor visibility with ownership. A release racing a hop
+        // must not leave the source hidden after its active lease was cleared.
+        let state = self.state.lock().unwrap();
+        self.backend
+            .set_forwarding(state.active.is_some() || state.away.is_some())
+    }
     fn disconnect_controls(&self) {
         self.release();
         let mut state = self.state.lock().unwrap();
         let mut channels = self.channels.lock().unwrap();
         channels.clear();
+        state.layout_offers.clear();
         for peer in state.peers.values_mut() {
             peer.connected = false;
             peer.latency_ms = None;
@@ -865,7 +918,7 @@ impl Service {
         let (mut reader, mut writer) = secure.split();
         let local = self.state.lock().unwrap().local.clone();
         let hello = Message::Hello {
-            version: 1,
+            version: 2,
             device: local,
             purpose: purpose.into(),
             port: self.listening_port,
@@ -888,8 +941,11 @@ impl Service {
             anyhow::bail!("Expected encrypted peer introduction")
         };
         anyhow::ensure!(
-            version == 1
-                && port > 1024
+            version == 2,
+            "Update both computers to version 0.1.2 or newer; protocol versions differ"
+        );
+        anyhow::ensure!(
+            port > 1024
                 && device.id == id
                 && device.name.len() <= 256
                 && device.platform.len() <= 32
@@ -996,8 +1052,11 @@ impl Service {
             anyhow::bail!("Expected peer introduction")
         };
         anyhow::ensure!(
-            version == 1
-                && port > 1024
+            version == 2,
+            "Update both computers to version 0.1.2 or newer; protocol versions differ"
+        );
+        anyhow::ensure!(
+            port > 1024
                 && device.id == id
                 && id != self.identity.id
                 && device.name.len() <= 256
@@ -1019,7 +1078,7 @@ impl Service {
         let local = self.state.lock().unwrap().local.clone();
         writer
             .send(&Message::Hello {
-                version: 1,
+                version: 2,
                 device: local,
                 purpose: purpose.clone(),
                 port: self.listening_port,
@@ -1178,12 +1237,19 @@ impl Service {
                     return; // Superseded tasks must not disconnect a replacement.
                 }
                 channels.remove(&id);
+                st.layout_offers.remove(&id);
                 if let Some(p) = st.peers.get_mut(&id) {
                     p.connected = false;
                     p.last_error = result.as_ref().err().map(|e| e.to_string());
                 }
-                st.active.as_ref().is_some_and(|a| a.peer == id)
+                let shared = st
+                    .shared_keys
+                    .remove(&id)
+                    .is_some_and(|keys| !keys.is_empty());
+                shared
+                    || st.active.as_ref().is_some_and(|a| a.peer == id)
                     || st.inbound.as_deref() == Some(&id)
+                    || st.away.as_ref().is_some_and(|(owner, _)| owner == &id)
             };
             if needs_release {
                 s.release();
@@ -1207,6 +1273,75 @@ impl Service {
             }
         })
     }
+    fn announce_focus(&self, target: &str) {
+        let c = self.routing.load();
+        let peers: Vec<_> = self
+            .state
+            .lock()
+            .unwrap()
+            .peers
+            .iter()
+            .filter(|(id, p)| p.connected && c.peers.get(*id).copied().unwrap_or(false))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in peers {
+            self.send(
+                &id,
+                Message::CursorFocus {
+                    device_id: target.into(),
+                },
+            );
+        }
+    }
+    pub fn share_layout(&self) -> Result<usize> {
+        let c = self.routing.load();
+        anyhow::ensure!(
+            !c.settings.paused,
+            "Resume sharing before sending an arrangement"
+        );
+        let peers: Vec<_> = self
+            .state
+            .lock()
+            .unwrap()
+            .peers
+            .iter()
+            .filter(|(id, p)| p.connected && c.peers.get(*id).copied().unwrap_or(false))
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut sent = 0;
+        for id in peers {
+            let layout = c
+                .layout
+                .iter()
+                .filter(|l| l.device_id == self.identity.id || l.device_id == id)
+                .cloned()
+                .collect();
+            if self.send(&id, Message::LayoutOffer { layout }) {
+                sent += 1;
+            }
+        }
+        anyhow::ensure!(sent > 0, "No connected computer allows input sharing");
+        Ok(sent)
+    }
+    pub fn accept_layout(&self, peer: &str) -> Result<()> {
+        let offer = self
+            .state
+            .lock()
+            .unwrap()
+            .layout_offers
+            .get(peer)
+            .cloned()
+            .context("Arrangement offer expired")?;
+        let mut layout = self.config.lock().unwrap().layout.clone();
+        layout.retain(|l| l.device_id != self.identity.id && l.device_id != peer);
+        layout.extend(offer);
+        self.set_layout(layout)?;
+        self.state.lock().unwrap().layout_offers.remove(peer);
+        Ok(())
+    }
+    pub fn dismiss_layout(&self, peer: &str) {
+        self.state.lock().unwrap().layout_offers.remove(peer);
+    }
     fn receive_control(&self, id: &str, message: Message) -> Result<()> {
         let allowed = {
             let c = self.routing.load();
@@ -1216,6 +1351,117 @@ impl Service {
                 && self.input_available.load(Ordering::SeqCst)
         };
         match message {
+            Message::SharedKey { code, down } => {
+                anyhow::ensure!(
+                    InputEvent::Key { code, down }.validate(),
+                    "Invalid shared key"
+                );
+                if !allowed {
+                    return Ok(());
+                }
+                let c = self.routing.load();
+                let mut st = self.state.lock().unwrap();
+                let keys = st.shared_keys.entry(id.into()).or_default();
+                if down {
+                    keys.insert(code);
+                } else {
+                    keys.remove(&code);
+                }
+                let source = st
+                    .peers
+                    .get(id)
+                    .map(|p| p.device.platform.as_str())
+                    .unwrap_or("");
+                let active = st.active.clone();
+                let target = active
+                    .as_ref()
+                    .and_then(|a| st.peers.get(&a.peer))
+                    .map(|p| p.device.platform.as_str())
+                    .unwrap_or(st.local.platform.as_str());
+                let event = InputEvent::Key {
+                    code: topology::map_key(code, source, target, c.settings.map_modifiers),
+                    down,
+                };
+                drop(st);
+                if let Some(active) = active {
+                    if c.peers.get(&active.peer).copied().unwrap_or(false)
+                        && !self.send(&active.peer, Message::Input(event))
+                    {
+                        self.release();
+                    }
+                } else {
+                    self.backend.inject(&event)?;
+                }
+            }
+            Message::LayoutOffer { layout } => {
+                anyhow::ensure!(allowed, "Input sharing disabled");
+                topology::validate(&layout)?;
+                let st = self.state.lock().unwrap();
+                anyhow::ensure!(
+                    layout.iter().all(|l| {
+                        let device = if l.device_id == st.local.id {
+                            Some(&st.local)
+                        } else if l.device_id == id {
+                            st.peers.get(id).map(|p| &p.device)
+                        } else {
+                            None
+                        };
+                        device.is_some_and(|d| d.displays.iter().any(|d| d.id == l.display_id))
+                    }),
+                    "Arrangement contains unknown displays"
+                );
+                anyhow::ensure!(
+                    [st.local.id.as_str(), id]
+                        .iter()
+                        .all(|id| layout.iter().any(|l| l.device_id == *id && !l.hidden)),
+                    "Arrangement must show both computers"
+                );
+                drop(st);
+                self.state
+                    .lock()
+                    .unwrap()
+                    .layout_offers
+                    .insert(id.into(), layout);
+            }
+            Message::CursorFocus { device_id } => {
+                if !allowed {
+                    return Ok(());
+                }
+                let mut st = self.state.lock().unwrap();
+                anyhow::ensure!(
+                    device_id == st.local.id
+                        || device_id == id
+                        || st
+                            .peers
+                            .get(&device_id)
+                            .is_some_and(|p| p.connected && p.trusted),
+                    "Unknown cursor destination"
+                );
+                let old_active = st.active.take();
+                let keep_inbound = device_id == st.local.id && st.inbound.as_deref() == Some(id);
+                let old_inbound = if keep_inbound {
+                    None
+                } else {
+                    st.inbound.take()
+                };
+                if device_id == st.local.id {
+                    st.away = None;
+                } else {
+                    st.away = Some((id.into(), device_id));
+                }
+                st.edge = None;
+                let departing = st.away.is_some();
+                drop(st);
+                if departing || old_active.is_some() || old_inbound.is_some() {
+                    self.backend.inject(&InputEvent::ReleaseAll)?;
+                }
+                for previous in old_active.map(|a| a.peer).into_iter().chain(old_inbound) {
+                    if previous != id {
+                        self.send(&previous, Message::Leave);
+                    }
+                }
+                self.sync_forwarding()?;
+            }
             Message::Enter { display_id, x, y } => {
                 anyhow::ensure!(allowed, "Input sharing disabled for this computer");
                 let valid = {
@@ -1226,13 +1472,25 @@ impl Service {
                         .any(|d| d.id == display_id && d.bounds.contains(x, y))
                 };
                 anyhow::ensure!(valid, "Invalid cursor entry");
-                let same_owner = self.state.lock().unwrap().inbound.as_deref() == Some(id);
+                let (same_owner, old_active, old_inbound) = {
+                    let mut st = self.state.lock().unwrap();
+                    let same = st.inbound.as_deref() == Some(id);
+                    let old = (st.active.take(), st.inbound.take());
+                    st.inbound = Some(id.into());
+                    st.away = None;
+                    st.edge = None;
+                    (same, old.0, old.1)
+                };
                 if !same_owner {
-                    self.release();
-                } else {
-                    let _ = self.backend.inject(&InputEvent::ReleaseAll);
+                    self.backend.inject(&InputEvent::ReleaseAll)?;
                 }
-                self.state.lock().unwrap().inbound = Some(id.into());
+                // Never echo Leave to the new controller: it would cancel its new lease.
+                for previous in old_active.map(|a| a.peer).into_iter().chain(old_inbound) {
+                    if previous != id {
+                        self.send(&previous, Message::Leave);
+                    }
+                }
+                self.sync_forwarding()?;
                 self.backend.inject(&InputEvent::Move { x, y })?;
             }
             Message::Input(event) => {
@@ -1269,6 +1527,7 @@ impl Service {
                     let _ = self.backend.inject(&InputEvent::ReleaseAll);
                 }
                 if let Some(a) = active {
+                    let _ = self.sync_forwarding();
                     let _ = self.backend.inject(&InputEvent::Move {
                         x: a.return_x,
                         y: a.return_y,
@@ -1353,10 +1612,44 @@ impl Service {
         if c.settings.paused {
             return false;
         }
+        // Only physical events reach capture; injected events are filtered by adapters.
+        // A local controller can reclaim an idle computer without a stuck cursor.
+        if let CapturedEvent::Input(InputEvent::Key { code, down }) = &event {
+            if let Some((owner, _)) = &s.away {
+                let owner = owner.clone();
+                let message = Message::SharedKey {
+                    code: *code,
+                    down: *down,
+                };
+                drop(s);
+                if self.send(&owner, message) {
+                    return true;
+                }
+                self.release();
+                return false;
+            }
+            // A receiving computer's own keyboard targets the same visible local cursor.
+            if s.inbound.is_some() {
+                return false;
+            }
+        }
+        let reclaim = s.away.take().is_some() || s.inbound.is_some();
+        if reclaim {
+            drop(s);
+            let _ = self.sync_forwarding();
+            s = self.state.lock().unwrap();
+        }
         if let Some(owner) = s.inbound.take() {
             drop(s);
             let _ = self.backend.inject(&InputEvent::ReleaseAll);
             self.send(&owner, Message::Leave);
+            s = self.state.lock().unwrap();
+        }
+        if reclaim {
+            drop(s);
+            // Leave increments the queue epoch; announce after it so this
+            // ownership update cannot be invalidated as stale input.
+            self.announce_focus(&self.identity.id);
             s = self.state.lock().unwrap();
         }
         match event {
@@ -1415,7 +1708,9 @@ impl Service {
                 let next = if c.settings.cursor_locked || c.settings.game_mode {
                     None
                 } else {
-                    topology::adjacent(&c.layout, &from, wx, wy, motion.0, motion.1).cloned()
+                    topology::adjacent(&c.layout, &from, wx, wy, motion.0, motion.1)
+                        .filter(|next| s.active.is_some() || next.device_id != s.local.id)
+                        .cloned()
                 };
                 if let Some(next) = next {
                     let online = next.device_id == s.local.id
@@ -1453,10 +1748,12 @@ impl Service {
                                 s.edge = None;
                                 if next.device_id == s.local.id {
                                     drop(s);
+                                    let _ = self.sync_forwarding();
                                     if let Some(a) = old {
                                         self.send(&a.peer, Message::Leave);
                                     }
                                     let _ = self.backend.inject(&InputEvent::Move { x: px, y: py });
+                                    self.announce_focus(&self.identity.id);
                                     self.restore_physical();
                                     return true;
                                 }
@@ -1481,8 +1778,11 @@ impl Service {
                                     local_display.bounds.y + local_display.bounds.height / 2.;
                                 drop(s);
                                 let old_was_local = old.is_none();
+                                let same_peer = old.as_ref().is_some_and(|a| a.peer == peer);
                                 if let Some(a) = old {
-                                    self.send(&a.peer, Message::Leave);
+                                    if !same_peer {
+                                        self.send(&a.peer, Message::Leave);
+                                    }
                                 }
                                 if old_was_local {
                                     self.release_physical_on_source();
@@ -1491,6 +1791,12 @@ impl Service {
                                     x: park_x,
                                     y: park_y,
                                 });
+                                if let Err(e) = self.sync_forwarding() {
+                                    self.note(format!("Cannot suppress local input: {e}"));
+                                    self.release();
+                                    return false;
+                                }
+                                self.announce_focus(&peer);
                                 if !self.send(
                                     &peer,
                                     Message::Enter {
@@ -1502,7 +1808,9 @@ impl Service {
                                     self.release();
                                     return false;
                                 }
-                                self.forward_physical_to(&peer);
+                                if !same_peer {
+                                    self.forward_physical_to(&peer);
+                                }
                                 return true;
                             }
                         }
@@ -1556,6 +1864,7 @@ impl Service {
                     false
                 }
             }
+            CapturedEvent::Unsupported => s.active.is_some(),
         }
     }
     fn physical(&self) -> (Vec<u16>, Vec<u8>) {
@@ -1795,9 +2104,25 @@ impl Service {
             let mut tick = tokio::time::interval(Duration::from_millis(700));
             loop {
                 tokio::select! {_=stop.changed()=>break,_=tick.tick()=>{
-                    let settings=s.config.lock().unwrap().settings.clone();if settings.paused||!s.session_available.load(Ordering::SeqCst)||!(settings.clipboard_text||settings.clipboard_html||settings.clipboard_images){continue;}
+                    let settings=s.config.lock().unwrap().settings.clone();if settings.paused||!s.session_available.load(Ordering::SeqCst)||!(settings.clipboard_text||settings.clipboard_html||settings.clipboard_images||settings.clipboard_files){continue;}
                     if s.clipboard_retry.swap(false, Ordering::SeqCst) { last_revision = None; }
-                    let revision=s.backend.clipboard_revision().map(|n|(n,settings.clipboard_text,settings.clipboard_html,settings.clipboard_images));if revision.is_some()&&revision==last_revision{continue;}
+                    let revision=s.backend.clipboard_revision().map(|n|(n,settings.clipboard_text,settings.clipboard_html,settings.clipboard_images,settings.clipboard_files));if revision.is_some()&&revision==last_revision{continue;}
+                    if settings.clipboard_files {
+                        let backend=s.backend.clone();
+                        if let Ok(Ok(mut paths))=tokio::task::spawn_blocking(move||backend.read_file_clipboard()).await {
+                            paths.sort();paths.dedup();
+                            if !paths.is_empty() {
+                                let hash=crate::transfer::file_list_hash(&paths);
+                                let changed={let mut previous=s.file_clipboard_hash.lock().unwrap();if *previous==hash {false} else {*previous=hash;true}};
+                                if changed && paths.len()<=100 {
+                                    let peers={let c=s.config.lock().unwrap();let st=s.state.lock().unwrap();st.peers.iter().filter(|(id,p)|p.connected&&c.peers.get(*id).is_some_and(|p|p.allow_clipboard&&p.allow_files)).map(|(id,_)|id.clone()).collect::<Vec<_>>()};
+                                    for peer in peers {let service=s.clone();let paths=paths.clone();tokio::spawn(async move {if service.send_file_clipboard(&peer,paths).await.is_err(){service.note("Copied files could not be shared. Check transfer consent, file limits and use regular files.".into());}});}
+                                }
+                                last_revision=revision;
+                                continue;
+                            }
+                        }
+                    }
                     let backend=s.backend.clone();let parts=match tokio::task::spawn_blocking(move||backend.read_clipboard()).await{Ok(Ok(p))=>filter_clipboard(p,&settings),_=>continue};last_revision=revision;if parts.is_empty(){continue;}
                     let Ok(data)=serde_json::to_vec(&parts)else{continue;};if data.len()>8*1024*1024{continue;}let hash=Sha256::digest(&data).to_vec();
                     let changed={let mut st=s.state.lock().unwrap();if st.clipboard_hash==hash{false}else{st.clipboard_hash=hash.clone();true}};if !changed{continue;}

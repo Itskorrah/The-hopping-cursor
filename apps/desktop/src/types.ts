@@ -29,6 +29,7 @@ export interface Settings {
   clipboard_text: boolean;
   clipboard_images: boolean;
   clipboard_html: boolean;
+  clipboard_files: boolean;
   map_modifiers: boolean;
   auto_accept_files: boolean;
   receive_directory: string;
@@ -67,6 +68,7 @@ export interface Snapshot {
   settings: Settings;
   peers: Peer[];
   layout: LayoutDisplay[];
+  layout_offers: { peer_id: string; layout: LayoutDisplay[] }[];
   profiles: string[];
   hop_keys: { device_id: string; display_id: string; keys: number[] }[];
   peer_permissions: Record<
@@ -81,8 +83,11 @@ export interface Snapshot {
     explanation: string;
   };
   active_device: string;
+  controller_device?: string;
+  cursor_visible?: boolean;
   listening_port: number;
   diagnostics: string[];
   version: string;
   session_available: boolean;
+  suppressed_events?: number | null;
 }

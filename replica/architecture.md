@@ -57,3 +57,24 @@ local received paths are published back to the OS clipboard. No executable files
 Build order: protocol/config/topology tests → two-process encrypted vertical
 slice → native adapters → clipboard/transfers → IPC interface → installer and
 CI → platform checks and honest parity report.
+
+Protocol 2 (0.1.2) adds CursorFocus, SharedKey, LayoutOffer and FileClipboard
+batch metadata. Version 1 peers fail closed with update guidance. Focus comes
+only from authenticated peers with input permission; actual Enter still validates
+native display IDs/coordinates. Physical controllers reclaim locally; idle-peer
+keyboards route to the controller and retain modifier translation. Disconnects
+release synthetic shared keys. Arrangement offers contain only the sender and
+recipient's known displays, are bounded to one per peer, and require explicit
+local acceptance. No remote configuration write occurs on offer receipt.
+
+Windows motion comes from a dedicated Raw Input sink on its hook thread. Legacy
+moves are never forwarded a second time. The same thread owns a 3-pixel layered,
+non-activating parking window for cursor hiding, restored on release/stop. This
+is ordinary desktop behavior; other applications' raw input and secure desktops
+remain outside the suppression guarantee. Mac uses balanced CG cursor calls.
+
+Automatic file clipboard is disabled by default and requires both clipboard
+and file policy. Batch IDs/indices are validated; at most four live batches and
+100 regular files per batch. Native paths never cross the network. Clipboard
+publication uses only verified local destinations, preserves recipient changes,
+suppresses echo and superseded batches. Long downloads finish before OS paste.

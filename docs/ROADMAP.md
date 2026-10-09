@@ -4,6 +4,12 @@ The implemented engine is ready for controlled two-computer testing. This list
 orders the remaining work by its effect on a reliable product. It does not imply
 that unfinished features currently work.
 
+The 2026-10-10 alpha checkpoint is on main. Basic bidirectional Windows↔Mac
+control is user-confirmed. Continue with [the Windows handoff](WINDOWS_HANDOFF.md):
+first correct Windows E opening Mac emojis (BUG-018), then Windows-source mouse
+feel (BUG-019) and setup/reconnect friction (BUG-020), preserving the smooth
+Mac→Windows path. These remain open, and native file dragging is unfinished.
+
 1. **Validate native input on hardware.** Complete PLATFORM_TESTING.md for
    Windows→Windows, Mac→Mac, and both directions of Windows↔Mac. Include Retina,
    Windows scaling, offset displays, held drags/modifiers, keyboard layouts,
@@ -16,8 +22,8 @@ that unfinished features currently work.
    Cross-port identity persistence remains driver/hardware dependent.
 3. **Finish native file interoperability.** Explicit Explorer CF_HDROP / Finder
    file-URL clipboard actions now use consented streamed transfers. Validate these
-   across applications, then add automatic file-clipboard synchronization,
-   Explorer OLE drag objects and Finder file promises with real OS drag lifecycles.
+   across applications, opt-in automatic verified file batches now have encrypted integration checks.
+   Next add Explorer OLE drag objects and Finder file promises with real OS drag lifecycles.
    Preserve recipient trust, explicit policy, duplicate protection, cancellation,
    and temporary cleanup. Test OS drag lifecycle and destination applications;
    app-window drops alone do not satisfy native edge dragging or file clipboard.

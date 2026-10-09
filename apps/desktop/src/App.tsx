@@ -246,7 +246,8 @@ export default function App() {
         <Mark />
         <h1>The Hopping Cursor</h1>
         <p>{failure || "Starting your local workspace…"}</p>
-        {failure && <button onClick={() => void refresh()}>Retry</button>}
+        {failure && <button onClick={() => void refresh()}>Check again</button>}
+        {native && <button onClick={() => void call("quit_app")}>Quit application</button>}
       </div>
     );
   const connected = data.peers.filter((p) => p.connected),
@@ -358,7 +359,7 @@ export default function App() {
               </h1>
               <p>
                 {page === "workspace"
-                  ? "One mouse and keyboard. Room to move."
+                  ? "Use either mouse. Your keyboards follow the shared cursor."
                   : page === "computers"
                     ? "Discover, pair, and manage the computers on your local network."
                     : page === "transfers"
@@ -401,8 +402,23 @@ export default function App() {
               <button onClick={() => void refresh()}>Retry</button>
             </div>
           )}
+          {page !== "workspace" && (data.layout_offers || []).length > 0 && (
+            <div className="notice" role="status">
+              A paired computer sent a screen arrangement.
+              <button
+                className="text-button"
+                onClick={() => setPage("workspace")}
+              >
+                Review arrangement
+              </button>
+            </div>
+          )}
           {native && !data.session_available && (
-            <div className="notice" role="status">Sharing is suspended while the OS input session is protected. Return to the normal desktop or leave secure keyboard entry to resume.</div>
+            <div className="notice" role="status">
+              Sharing is suspended while the OS input session is protected.
+              Return to the normal desktop or leave secure keyboard entry to
+              resume.
+            </div>
           )}
           {native &&
             (!data.permissions.capture || !data.permissions.injection) && (
@@ -414,7 +430,12 @@ export default function App() {
                 </div>
                 <button
                   className="button secondary"
-                  onClick={() => void run(() => call("request_input_permissions"), "Permission status refreshed. Approve the system prompts, then retry or restart if requested.")}
+                  onClick={() =>
+                    void run(
+                      () => call("request_input_permissions"),
+                      "Permission status refreshed. Approve the system prompts, then retry or restart if requested.",
+                    )
+                  }
                 >
                   Grant permissions / Retry
                 </button>
@@ -807,6 +828,40 @@ export default function App() {
                 </div>
                 <p className="footnote">{data.permissions.explanation}</p>
                 <dl className="diagnostic-values">
+                  {data.suppressed_events != null && (
+                    <div>
+                      <dt>Locally suppressed input events</dt>
+                      <dd>{data.suppressed_events}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt>Mouse controller</dt>
+                    <dd>
+                      {data.controller_device === data.local.id
+                        ? data.local.name
+                        : data.peers.find(
+                            (p) => p.device.id === data.controller_device,
+                          )?.device.name || "This computer"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Cursor destination</dt>
+                    <dd>
+                      {data.active_device === data.local.id
+                        ? data.local.name
+                        : data.peers.find(
+                            (p) => p.device.id === data.active_device,
+                          )?.device.name || "Unavailable"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Local cursor</dt>
+                    <dd>
+                      {data.cursor_visible === false
+                        ? "Hidden while input is elsewhere"
+                        : "Visible"}
+                    </dd>
+                  </div>
                   <div>
                     <dt>Listening port</dt>
                     <dd>TCP {data.listening_port}</dd>
@@ -1182,9 +1237,18 @@ function TransferRow({
         )}
         <p className="device-error">{t.error}</p>
         {t.saved_path && <small>Saved to {t.saved_path}</small>}
-        {native && t.direction === "incoming" && t.state === "complete" && t.saved_path && (
-          <button className="text-button" onClick={copy} aria-label={`Copy received ${t.name}`}>Copy file for pasting</button>
-        )}
+        {native &&
+          t.direction === "incoming" &&
+          t.state === "complete" &&
+          t.saved_path && (
+            <button
+              className="text-button"
+              onClick={copy}
+              aria-label={`Copy received ${t.name}`}
+            >
+              Copy file for pasting
+            </button>
+          )}
       </div>
       {t.state === "offered" ? (
         <div className="transfer-buttons">
@@ -1295,6 +1359,12 @@ function Preferences({
           description="Share images up to the clipboard transfer limit."
           on={s.clipboard_images}
           change={() => change({ clipboard_images: !s.clipboard_images })}
+        />
+        <Toggle
+          label="File clipboard"
+          description="Copy regular files in Finder or Explorer, accept them on the other computer, then paste. Enable on both computers. Newer clipboard contents are preserved; zip folders first."
+          on={s.clipboard_files}
+          change={() => change({ clipboard_files: !s.clipboard_files })}
         />
         <Toggle
           label="Translate Command and Control"
@@ -1485,6 +1555,55 @@ function Arrangement({
       ? data.local
       : data.peers.find((p) => p.device.id === id)?.device;
   const key = (d: LayoutDisplay) => `${d.device_id}/${d.display_id}`;
+  const nativeDisplay = (d: LayoutDisplay) =>
+    device(d.device_id)?.displays.find((n) => n.id === d.display_id);
+  const displayLabel = (d: LayoutDisplay) => {
+    const owner = device(d.device_id),
+      native = nativeDisplay(d);
+    if (!owner || !native) return "Offline display";
+    const ordered = [...owner.displays].sort(
+      (a, b) =>
+        a.bounds.x - b.bounds.x ||
+        a.bounds.y - b.bounds.y ||
+        a.id.localeCompare(b.id),
+    );
+    return `Display ${ordered.findIndex((n) => n.id === d.display_id) + 1}${native.primary ? " · Primary" : ""}`;
+  };
+  const useNativeOrder = () => {
+    setDraft((old) => {
+      const origins = new Map<
+        string,
+        { x: number; y: number; nativeX: number; nativeY: number }
+      >();
+      for (const d of old) {
+        const owner = device(d.device_id);
+        if (!owner?.displays.length || origins.has(owner.id)) continue;
+        const group = old.filter((e) => e.device_id === owner.id);
+        origins.set(owner.id, {
+          x: Math.min(...group.map((e) => e.rect.x)),
+          y: Math.min(...group.map((e) => e.rect.y)),
+          nativeX: Math.min(...owner.displays.map((e) => e.bounds.x)),
+          nativeY: Math.min(...owner.displays.map((e) => e.bounds.y)),
+        });
+      }
+      return old.map((d) => {
+        const origin = origins.get(d.device_id),
+          native = nativeDisplay(d);
+        return origin && native
+          ? {
+              ...d,
+              rect: {
+                x: origin.x + native.bounds.x - origin.nativeX,
+                y: origin.y + native.bounds.y - origin.nativeY,
+                width: native.bounds.width,
+                height: native.bounds.height,
+              },
+            }
+          : d;
+      });
+    });
+    setDirty(true);
+  };
   const move = (id: string, x: number, y: number) => {
     setDraft((old) => {
       const target = old.find((d) => key(d) === id);
@@ -1525,7 +1644,8 @@ function Arrangement({
           <h2>Arrange your displays</h2>
           <p>
             Place screens like they sit on your desk. Touching edges let your
-            cursor cross.
+            cursor cross. Save here, then share the arrangement and apply it on
+            the other computer for control in both directions.
           </p>
         </div>
         <button className="button secondary" onClick={add}>
@@ -1533,6 +1653,57 @@ function Arrangement({
           Add computer
         </button>
       </div>
+      {(data.layout_offers || []).map((offer) => (
+        <div className="notice" key={offer.peer_id} role="status">
+          <div>
+            <strong>
+              Arrangement from{" "}
+              {data.peers.find((p) => p.device.id === offer.peer_id)?.device
+                .name || "paired computer"}
+            </strong>
+            <p>
+              {offer.layout.length} displays. Applying replaces the saved
+              positions for these two computers.
+            </p>
+            <p>
+              {offer.layout
+                .map(
+                  (l) =>
+                    `${data.local.id === l.device_id ? data.local.name : data.peers.find((p) => p.device.id === l.device_id)?.device.name || "Computer"}: ${l.rect.x}, ${l.rect.y}${l.hidden ? " (hidden)" : ""}`,
+                )
+                .join(" · ")}
+            </p>
+            {dirty && (
+              <p>Save or reset your edits before applying this arrangement.</p>
+            )}
+          </div>
+          <button
+            className="button secondary"
+            disabled={dirty || saving}
+            onClick={() =>
+              void action(
+                "accept_layout",
+                { peer: offer.peer_id },
+                "Shared arrangement applied",
+              )
+            }
+          >
+            Apply arrangement
+          </button>
+          <button
+            className="text-button"
+            onClick={() =>
+              void action(
+                "dismiss_layout",
+                { peer: offer.peer_id },
+                "Arrangement dismissed",
+              )
+            }
+          >
+            Dismiss
+          </button>
+        </div>
+      ))}
       <div className="canvas-toolbar">
         <span>
           <span className="status-dot" />
@@ -1541,6 +1712,29 @@ function Arrangement({
         </span>
         <div>
           {dirty && <Badge tone="warning">Unsaved changes</Badge>}
+          <button
+            className="text-button"
+            disabled={
+              dirty ||
+              saving ||
+              data.settings.paused ||
+              !data.peers.some(
+                (p) => p.connected && data.peer_permissions[p.device.id]?.input,
+              )
+            }
+            onClick={() =>
+              void action(
+                "share_layout",
+                {},
+                "Arrangement sent. Apply it in Workspace on the other computer.",
+              )
+            }
+          >
+            Share arrangement
+          </button>
+          <button className="text-button" onClick={useNativeOrder}>
+            Use OS display order
+          </button>
           <button
             className="text-button"
             onClick={() => {
@@ -1594,7 +1788,7 @@ function Arrangement({
               >
                 <button
                   className="screen-drag"
-                  aria-label={`Arrange ${owner?.name || "Offline computer"} display`}
+                  aria-label={`Arrange ${owner?.name || "Offline computer"} display${(owner?.displays.length || 0) > 1 ? ` ${displayLabel(d)}` : ""}`}
                   onFocus={() => setSelected(id)}
                   onPointerDown={(e) => {
                     if (e.button !== 0) return;
@@ -1665,6 +1859,7 @@ function Arrangement({
                     <span className={`status-dot ${online ? "" : "gray"}`} />
                   </span>
                   <strong>{owner?.name || "Offline computer"}</strong>
+                  <small>{displayLabel(d)}</small>
                   <small>
                     {d.rect.width} × {d.rect.height}
                   </small>
@@ -1723,7 +1918,9 @@ function Arrangement({
           const digit = binding?.keys.find((k) => k >= 30 && k <= 38) || 0;
           return (
             <div className="display-inspector">
-              <span>{device(d.device_id)?.name} display</span>
+              <span>
+                {device(d.device_id)?.name} · {displayLabel(d)}
+              </span>
               <label htmlFor="hop-shortcut">Hop shortcut</label>
               <select
                 id="hop-shortcut"

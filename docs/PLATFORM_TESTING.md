@@ -60,6 +60,34 @@ An installer build is not evidence that input behavior has passed this checklist
     and packet-loss conditions. Heartbeat RTT is a different measurement.
 
 Still out of scope: UAC/Windows login/secure desktop input, native Finder/Explorer
-file dragging across monitor edges, automatic file-clipboard synchronization, dimming, session
+file dragging across monitor edges, folder/file-promise support, dimming, session
 lock/wake synchronization, relative/raw gaming input, and system-wide media keys. Explicit file-list clipboard
-bridging is implemented but still needs the cross-application checks above.
+bridging and opt-in verified regular-file synchronization are implemented but still need cross-application checks. See TEST_0.1.2.md and WINDOWS_HANDOFF.md for current acceptance and user-reported open defects.
+
+## Three-screen regression retest (0.1.1)
+
+Update both computers, keeping their identities/settings. On both workspaces,
+use OS display order to repair reversed enumeration, then arrange Mac → Windows
+primary → Windows secondary and save. Confirm the Primary label matches the
+middle monitor. Layouts are independent. Open harmless blank editors on both.
+
+The [0.1.1 Windows test ZIP](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.1-test.1)
+contains the new installer. Fully quit the previous PC app from its tray menu,
+install, reopen and confirm v0.1.1. This package was cross-built on macOS and
+has not yet passed actual Windows installation/runtime acceptance. The locally
+installed Mac app is already 0.1.1; its permission/IPC checks pass.
+
+- Mac right edge enters the middle PC display; continue to the right PC display.
+- While controlling the PC, Mac pointer stays hidden/parked and clicks, scroll,
+  typing and shortcuts do not affect Mac applications. Check the aggregate
+  locally suppressed-event count increases without recording content.
+- Windows primary left edge enters the Mac; remote clicks and keys affect the
+  Mac alone. Physical movement between the PC's own monitors does not wrap.
+- Hold a harmless drag or modifier across both PC monitors; it must remain held
+  until physically released. Test both screen-edge return and Ctrl+Alt+Esc.
+- Pause, disconnect, revoke permissions and quit: source cursor must become
+  visible again and held remote input must release.
+
+The tests model portable routing and directly exercise the Mac filter using
+constructed events that are never posted. They do not establish physical hook,
+background cursor visibility or foreground-application suppression behavior.

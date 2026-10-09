@@ -118,3 +118,154 @@
 OS permissions, hotplug/dock identities, native input, pasteboards, secure desktop,
 long-duration reliability and latency. These are verification gaps, not invented
 bug reproductions. See docs/PLATFORM_TESTING.md.
+
+### BUG-009: First remote monitor follows enumeration order instead of physical geometry
+
+- Severity: S2; flow F02; reported on the physical three-screen Mac/Windows setup.
+- Expected: the Mac's right edge enters the Windows primary display in the middle.
+- Actual: it enters the far-right display; both PC tiles had identical labels.
+- Reproduction: reversed native monitor enumeration puts the primary second;
+  the new topology regression fails against 0.1.0.
+- Change: preserve native bounds for new monitor groups, retain existing user
+  placements, label display order and primary status, and provide an explicit
+  OS-order repair action for existing layouts.
+- Status: automated regressions pass; exact physical arrangement requires retest.
+
+### BUG-010: Mac input remains visible/active while controlling Windows
+
+- Severity: S1; flow F02; user reports movement and clicks affecting both computers.
+- Findings: the native tap is active, but source cursor state was not managed.
+  Unmapped keys also bypassed local suppression. The exact cause of the reported
+  mapped-click duplication has not been isolated in a new physical trial.
+- Change: use an active Mac session filter, private marked injection source with
+  local-event suppression disabled, balanced cursor hiding and event-free parking;
+  suppress unsupported source keys while a remote lease is active. Restore cursor
+  state on release, leave, pause, session failure, disconnect and capture shutdown.
+  Windows restores its previous shared cursor shape without changing cursor themes.
+- Evidence: native direct-callback tests discard right clicks and unmapped keys
+  without posting test events into the session; injected events bypass capture.
+  Encrypted integration checks verify callback consumption and recovery state.
+- Status: physical duplicate-click/cursor verification remains open. Sharing
+  is paused until the updated apps and arrangements are ready for a controlled retest.
+
+### BUG-011: Windows left edge wraps to its other local monitor
+
+- Severity: S2; flow F02; user reports failure to enter the Mac from Windows.
+- Reproduction: swapping local monitor placements makes the engine consume the
+  primary display's native left edge and warp to the local secondary display.
+- Change: leave physical local-to-local motion to the native OS. Route only
+  cross-computer edges when local input owns the cursor. Both computers need
+  matching saved arrangements for bidirectional routing.
+- Status: regression and encrypted Windows-primary-to-Mac keyboard/button
+  routing tests pass. The updated cross-built 0.1.1 Windows test installer is
+  available; actual installation and physical Windows retest remain pending.
+
+### BUG-012: Crossing two remote monitors drops a held drag/key lease
+
+- Severity: S2; flow F02; found by regression testing the two-monitor PC.
+- Reproduction: a held button is released/re-pressed when switching displays
+  belonging to the same remote computer.
+- Cause: sending Leave and Enter on the same peer plus unconditional ReleaseAll.
+- Change: keep the same peer lease and held state across monitor transitions.
+- Status: failing-before/passing-after encrypted regression retained; hardware retest pending.
+
+### BUG-013: Idle destination retains a cursor after return
+
+- Severity: S2
+- Evidence: user physical report on 0.1.1, Mac→Windows trial.
+- Actual: Windows pointer stays at its edge after the cursor returns to Mac.
+- Change: protocol 2 communicates cursor focus to peers; idle recipients hide
+  through the native adapter. Windows uses a non-activating parking window,
+  without overwriting global cursor themes. Recovery restores it.
+- Status: automated ownership regression passes; physical Windows rendering and
+  ordinary application cursor compatibility still need 0.1.2 acceptance.
+
+### BUG-014: Windows physical control cannot enter Mac
+
+- Severity: originally S1; basic handoff user-verified on 0.1.2, broader acceptance open.
+- Evidence: user reports failure in the 0.1.1 three-screen trial.
+- Finding: Windows capture derives motion from clipped pointer coordinates;
+  layouts were independently saved. Neither is remotely established as the sole
+  cause on this PC.
+- Change: Raw Input deltas continue at the edge; explicit arrangement sharing
+  lets the recipient apply the same geometry. Both app versions must be 0.1.2.
+- Status: both-direction encrypted engine regressions and Windows strict compile
+  pass. On 2026-10-10 the user confirms basic physical handoff now works in both
+  directions. Remaining typing/motion/setup defects are BUG-018–020. This permits
+  the owner-authorized alpha checkpoint merge; exhaustive native QA is pending.
+
+### BUG-015: Physical takeover loses focus announcement
+
+- Severity: S2
+- Reproduction: encrypted integration test starts control, then moves the
+  destination's physical mouse to reclaim it.
+- Actual: urgent Leave advances the queue epoch and invalidates the earlier
+  normal-queue CursorFocus, leaving the previous source visible.
+- Fix: send focus after priority release; expose controller/destination state.
+  Do not echo Leave to a new controller during Enter.
+- Status: failing-before/passing-after regression; native counterpart pending.
+
+### BUG-016: Pending copied-file offers can replace newer clipboard choices
+
+- Severity: S2
+- Scope: newly added opt-in automatic file clipboard.
+- Tests: edit recipient clipboard during consent; answer old/new file offers
+  out of order. Publish only a complete verified latest batch, and preserve
+  newer recipient revisions. Hash verified local paths to prevent echo.
+- Status: encrypted integration tests pass; physical Finder/Explorer checks pending.
+
+### BUG-017: Keychain approval makes desktop startup appear frozen
+
+- Severity: S2.
+- Evidence: native process sample waits in SecItemCopyMatching while Tauri setup
+  synchronously blocks its main thread. SecurityAgent is running.
+- Change: background startup with readiness/error guards for every engine command.
+  Window and Quit are available before protected storage completes; no identity
+  regeneration or security bypass.
+- Status: strict native desktop Clippy and IPC-mocked startup regression pass.
+  The refreshed signed native Mac app opens with the existing identity and
+  all three permissions Available. Actual pending OS-dialog behavior remains
+  represented by a mock; no password/security bypass was performed.
+
+### BUG-018: Windows E opens macOS emoji picker
+
+- Severity: S2; keyboard correctness, priority first.
+- Evidence: user physical 0.1.2 report on 2026-10-10; not independently reproduced
+  by this Mac agent. Windows control → blank Mac editor → press unmodified E.
+- Expected: letter E/e. Actual: emoji picker. Other typing and bidirectional
+  handoff work. Mac injection preserves function flags; Fn/Globe+E is an OS
+  shortcut. Unwanted Fn state is a hypothesis, not a confirmed root cause.
+- Status: open, handed to Windows with Mac receiver checks and synthetic-event
+  regression required. Do not log actual physical key contents.
+
+### BUG-019: Windows mouse movement on Mac feels clunky
+
+- Severity: S2; user-experience defect.
+- Evidence: user's 0.1.2 directional comparison; Mac→Windows smooth, Windows→Mac
+  clunky. No measured latency or independent native reproduction yet.
+- Expected: consistent precise movement. Actual: uneven feel on Windows source.
+- To check: raw-count DPI/gain, logical/physical scaling, cadence, queues and
+  injection. Do not treat sensitivity or smoothing as an established fix.
+- Status: open; native Windows investigation and physical comparative acceptance
+  pending. Preserve the successful Mac-source path.
+
+### BUG-020: Initial sharing needs repeated connection/pause actions
+
+- Severity: S3; reported workaround is reconnect plus Pause/Resume.
+- Evidence: user on 0.1.2 used Connect, disconnect/reconnect and Workspace
+  Pause/Resume before both directions worked; exact transition not reproduced.
+- Expected: approved, correctly arranged peers become ready predictably and show
+  the exact blocker if sharing is paused, not paired or lacks permissions.
+- Actual: readiness was unclear and needed experimentation.
+- Status: open. Observe startup/reconnect state before changing it; never silently
+  resume a deliberate pause or bypass pairing/layout consent.
+
+### BUG-021: README preview leaves white space below the sidebar
+
+- Severity: S4; screenshot presentation.
+- Evidence: user's old browser preview screenshot extends below the sidebar.
+  CSS fixes the sidebar to the viewport; the current native window capture fills
+  the visible height and shows actual connected devices.
+- Fix: replace docs/images/workspace.jpg with an unedited native Mac 0.1.2 window
+  screenshot, and label its source/date in README. No CSS or input code changed.
+- Status: visually verified on 2026-10-10; documentation fix in this handoff commit.

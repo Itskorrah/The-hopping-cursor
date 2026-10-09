@@ -34,25 +34,58 @@ pub fn reconcile_device(layout: &mut Vec<LayoutDisplay>, device: &crate::model::
     layout.retain(|entry| {
         entry.device_id != device.id || device.displays.iter().any(|d| d.id == entry.display_id)
     });
+    let right = layout
+        .iter()
+        .filter(|d| !d.hidden)
+        .map(|d| d.rect.x + d.rect.width)
+        .fold(0., f64::max);
+    let min_x = device
+        .displays
+        .iter()
+        .map(|d| d.bounds.x)
+        .fold(f64::INFINITY, f64::min);
+    let min_y = device
+        .displays
+        .iter()
+        .map(|d| d.bounds.y)
+        .fold(f64::INFINITY, f64::min);
+    // Enumeration order is not physical order. Retain native monitor offsets.
+    let anchor = layout
+        .iter()
+        .find_map(|entry| {
+            if entry.device_id != device.id {
+                return None;
+            }
+            let native = device.displays.iter().find(|d| d.id == entry.display_id)?;
+            Some((
+                entry.rect.x - native.bounds.x,
+                entry.rect.y - native.bounds.y,
+            ))
+        })
+        .unwrap_or((right - min_x, -min_y));
     for display in &device.displays {
         if !layout
             .iter()
             .any(|entry| entry.device_id == device.id && entry.display_id == display.id)
         {
-            let x = layout
-                .iter()
-                .filter(|d| !d.hidden)
-                .map(|d| d.rect.x + d.rect.width)
-                .fold(0., f64::max);
+            let mut rect = Rect {
+                x: anchor.0 + display.bounds.x,
+                y: anchor.1 + display.bounds.y,
+                width: display.bounds.width,
+                height: display.bounds.height,
+            };
+            // Newly attached monitors must not overwrite user placements.
+            if layout.iter().any(|d| !d.hidden && overlap(&d.rect, &rect)) {
+                rect.x = layout
+                    .iter()
+                    .filter(|d| !d.hidden)
+                    .map(|d| d.rect.x + d.rect.width)
+                    .fold(0., f64::max);
+            }
             layout.push(LayoutDisplay {
                 device_id: device.id.clone(),
                 display_id: display.id.clone(),
-                rect: Rect {
-                    x,
-                    y: 0.,
-                    width: display.bounds.width,
-                    height: display.bounds.height,
-                },
+                rect,
                 hidden: false,
             });
         }
@@ -152,6 +185,52 @@ pub fn map_key(code: u16, source: &str, target: &str, enabled: bool) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn new_device_keeps_native_monitor_geometry_despite_enumeration_order() {
+        let mut layout = vec![d("mac", 0., 0.)];
+        let device = crate::model::Device {
+            id: "pc".into(),
+            name: "PC".into(),
+            platform: "windows".into(),
+            displays: vec![
+                crate::model::Display {
+                    id: "right".into(),
+                    name: "Right".into(),
+                    bounds: Rect {
+                        x: 1920.,
+                        y: 200.,
+                        width: 1920.,
+                        height: 1080.,
+                    },
+                    scale: 1.,
+                    primary: false,
+                },
+                crate::model::Display {
+                    id: "primary".into(),
+                    name: "Middle".into(),
+                    bounds: Rect {
+                        x: 0.,
+                        y: 0.,
+                        width: 1920.,
+                        height: 1080.,
+                    },
+                    scale: 1.,
+                    primary: true,
+                },
+            ],
+        };
+        reconcile_device(&mut layout, &device);
+        let primary = layout.iter().find(|d| d.display_id == "primary").unwrap();
+        let right = layout.iter().find(|d| d.display_id == "right").unwrap();
+        assert_eq!((primary.rect.x, primary.rect.y), (1920., 0.));
+        assert_eq!((right.rect.x, right.rect.y), (3840., 200.));
+        assert_eq!(
+            adjacent(&layout, &layout[0], 1919., 500., 2., 0.)
+                .unwrap()
+                .display_id,
+            "primary"
+        );
+    }
     fn d(id: &str, x: f64, y: f64) -> LayoutDisplay {
         LayoutDisplay {
             device_id: id.into(),

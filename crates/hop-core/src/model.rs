@@ -66,6 +66,7 @@ pub struct Settings {
     pub clipboard_text: bool,
     pub clipboard_images: bool,
     pub clipboard_html: bool,
+    pub clipboard_files: bool,
     pub map_modifiers: bool,
     pub auto_accept_files: bool,
     pub receive_directory: String,
@@ -84,6 +85,7 @@ impl Default for Settings {
             clipboard_text: true,
             clipboard_images: true,
             clipboard_html: true,
+            clipboard_files: false,
             map_modifiers: true,
             auto_accept_files: false,
             receive_directory: String::new(),
@@ -155,6 +157,11 @@ pub struct Permissions {
     pub explanation: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutOffer {
+    pub peer_id: String,
+    pub layout: Vec<LayoutDisplay>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     pub local: Device,
     pub public_key: String,
@@ -162,16 +169,20 @@ pub struct Snapshot {
     pub settings: Settings,
     pub peers: Vec<PeerStatus>,
     pub layout: Vec<LayoutDisplay>,
+    pub layout_offers: Vec<LayoutOffer>,
     pub profiles: Vec<String>,
     pub hop_keys: Vec<HopKey>,
     pub peer_permissions: BTreeMap<String, PeerPermissions>,
     pub transfers: Vec<TransferStatus>,
     pub permissions: Permissions,
     pub active_device: String,
+    pub controller_device: String,
+    pub cursor_visible: bool,
     pub listening_port: u16,
     pub diagnostics: Vec<String>,
     pub version: String,
     pub session_available: bool,
+    pub suppressed_events: Option<u64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerPermissions {
@@ -206,8 +217,15 @@ impl InputEvent {
 }
 #[derive(Debug, Clone)]
 pub enum CapturedEvent {
-    Move { x: f64, y: f64, dx: f64, dy: f64 },
+    Move {
+        x: f64,
+        y: f64,
+        dx: f64,
+        dy: f64,
+    },
     Input(InputEvent),
+    /// A native key without a portable mapping must not leak to the source.
+    Unsupported,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,6 +236,11 @@ pub struct ClipboardPart {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BlobKind {
     File,
+    FileClipboard {
+        batch: String,
+        index: u16,
+        total: u16,
+    },
     Clipboard,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +260,19 @@ pub enum Message {
         y: f64,
     },
     Leave,
+    /// The authenticated controller names the computer displaying the cursor.
+    CursorFocus {
+        device_id: String,
+    },
+    /// An idle peer keyboard follows the shared cursor without claiming its mouse.
+    SharedKey {
+        code: u16,
+        down: bool,
+    },
+    /// Arrangement changes require an explicit recipient action.
+    LayoutOffer {
+        layout: Vec<LayoutDisplay>,
+    },
     Input(InputEvent),
     BlobStart {
         id: String,

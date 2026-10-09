@@ -15,7 +15,7 @@ fn main() -> std::io::Result<()> {
     };
     let messages = [
         Message::Hello {
-            version: 1,
+            version: 2,
             device: Device {
                 id: "a".repeat(32),
                 name: "Synthetic".into(),

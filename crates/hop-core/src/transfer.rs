@@ -16,6 +16,22 @@ use tokio::{
     sync::oneshot,
 };
 
+pub(crate) struct FileBatch {
+    peer: String,
+    total: u16,
+    paths: Vec<PathBuf>,
+    revision: Option<u64>,
+    original: Vec<u8>,
+    created: std::time::Instant,
+    active: bool,
+    superseded: bool,
+}
+pub(crate) fn file_list_hash(paths: &[PathBuf]) -> Vec<u8> {
+    let mut paths = paths.to_vec();
+    paths.sort();
+    paths.dedup();
+    Sha256::digest(serde_json::to_vec(&paths).unwrap_or_default()).to_vec()
+}
 const CLIPBOARD_LIMIT: u64 = 8 * 1024 * 1024;
 fn safe_filename(name: &str) -> bool {
     if name.is_empty()
@@ -222,7 +238,56 @@ impl Service {
         );
         self.backend.write_file_clipboard(&[path])
     }
+    pub(crate) async fn send_file_clipboard(
+        self: &Arc<Self>,
+        peer: &str,
+        paths: Vec<PathBuf>,
+    ) -> Result<()> {
+        self.outgoing_allowed(peer, true)?;
+        anyhow::ensure!(
+            !paths.is_empty() && paths.len() <= 100,
+            "Copy 1–100 regular files"
+        );
+        for path in &paths {
+            anyhow::ensure!(
+                path.is_absolute()
+                    && tokio::fs::symlink_metadata(path)
+                        .await?
+                        .file_type()
+                        .is_file(),
+                "Zip folders first; symbolic links are not shared automatically"
+            );
+        }
+        let batch = uuid::Uuid::new_v4().to_string();
+        let total = paths.len() as u16;
+        for (index, path) in paths.into_iter().enumerate() {
+            anyhow::ensure!(
+                self.config.lock().unwrap().settings.clipboard_files,
+                "File clipboard sharing disabled"
+            );
+            self.outgoing_allowed(peer, true)?;
+            self.send_file_kind(
+                peer,
+                path,
+                BlobKind::FileClipboard {
+                    batch: batch.clone(),
+                    index: index as u16,
+                    total,
+                },
+            )
+            .await?;
+        }
+        Ok(())
+    }
     pub async fn send_file(self: &Arc<Self>, peer: &str, path: PathBuf) -> Result<()> {
+        self.send_file_kind(peer, path, BlobKind::File).await
+    }
+    async fn send_file_kind(
+        self: &Arc<Self>,
+        peer: &str,
+        path: PathBuf,
+        kind: BlobKind,
+    ) -> Result<()> {
         self.outgoing_allowed(peer, false)?;
         let _bulk = self
             .outgoing_bulk
@@ -261,7 +326,7 @@ impl Service {
             let mut hash=Sha256::new();let mut buffer=vec![0;CHUNK_SIZE];let mut hashed=0u64;let mut stop=self.stop.subscribe();loop{anyhow::ensure!(!self.cancelled.lock().unwrap().contains(&id)&&!*stop.borrow(),"Transfer cancelled");let n=file.read(&mut buffer).await?;if n==0{break;}hashed+=n as u64;anyhow::ensure!(hashed<=size,"Source file changed during hashing");hash.update(&buffer[..n]);}anyhow::ensure!(hashed==size,"Source file changed during hashing");
             file.rewind().await?;let hash=hex::encode(hash.finalize());self.outgoing_allowed(peer,false)?;
             let address=self.peer_address(peer)?;let(actual,mut reader,mut writer)=self.open(&address,"data").await?;anyhow::ensure!(actual==peer,"The address belongs to a different computer");
-            writer.send(&Message::BlobStart{id:id.clone(),kind:BlobKind::File,name,size,hash}).await?;self.progress(&id,0,"awaiting_acceptance");
+            writer.send(&Message::BlobStart{id:id.clone(),kind,name,size,hash}).await?;self.progress(&id,0,"awaiting_acceptance");
             let response=tokio::select!{_=stop.changed()=>anyhow::bail!("Application stopped"),_=self.wait_cancel(&id)=>anyhow::bail!("Transfer cancelled"),r=tokio::time::timeout(Duration::from_secs(65),reader.recv())=>r.context("File offer expired")??};
             anyhow::ensure!(matches!(response,Message::BlobAccept{id:ref got,accepted:true}if got==&id),"Recipient declined or file sharing is disabled");
             let mut offset=0;loop{anyhow::ensure!(!self.cancelled.lock().unwrap().contains(&id)&&!*stop.borrow(),"Transfer cancelled");self.outgoing_allowed(peer,false)?;let n=file.read(&mut buffer).await?;if n==0{break;}anyhow::ensure!(offset+n as u64<=size,"Source file changed during transfer");
@@ -346,8 +411,11 @@ impl Service {
         let settings = self.config.lock().unwrap().settings.clone();
         let allowed = {
             let c = self.config.lock().unwrap();
-            c.peers.get(&peer).is_some_and(|p| match kind {
+            c.peers.get(&peer).is_some_and(|p| match &kind {
                 BlobKind::File => p.allow_files,
+                BlobKind::FileClipboard { .. } => {
+                    p.allow_files && p.allow_clipboard && settings.clipboard_files
+                }
                 BlobKind::Clipboard => p.allow_clipboard,
             })
         };
@@ -356,8 +424,10 @@ impl Service {
                 .session_available
                 .load(std::sync::atomic::Ordering::SeqCst)
             && !settings.paused
-            && match kind {
-                BlobKind::File => safe_filename(&name) && size <= settings.max_file_bytes,
+            && match &kind {
+                BlobKind::File | BlobKind::FileClipboard { .. } => {
+                    safe_filename(&name) && size <= settings.max_file_bytes
+                }
                 BlobKind::Clipboard => {
                     size <= CLIPBOARD_LIMIT
                         && (settings.clipboard_text
@@ -386,7 +456,57 @@ impl Service {
                 id: id.clone(),
             }
         };
-        let is_file = matches!(kind, BlobKind::File);
+        let is_file = !matches!(kind, BlobKind::Clipboard);
+        let batch = if let BlobKind::FileClipboard {
+            batch,
+            index,
+            total,
+        } = &kind
+        {
+            anyhow::ensure!(
+                uuid::Uuid::parse_str(batch).is_ok()
+                    && *total > 0
+                    && *total <= 100
+                    && *index < *total,
+                "Invalid file clipboard batch"
+            );
+            let mut batches = self.file_batches.lock().unwrap();
+            batches.retain(|_, b| b.active || b.created.elapsed() < Duration::from_secs(600));
+            if *index == 0 {
+                anyhow::ensure!(
+                    batches.len() < 4 && !batches.contains_key(batch),
+                    "File clipboard batches are busy"
+                );
+                for record in batches.values_mut() {
+                    record.superseded = true;
+                }
+                let original = self.backend.read_file_clipboard()?;
+                batches.insert(
+                    batch.clone(),
+                    FileBatch {
+                        peer: peer.clone(),
+                        total: *total,
+                        paths: vec![],
+                        revision: self.backend.clipboard_revision(),
+                        original: file_list_hash(&original),
+                        created: std::time::Instant::now(),
+                        active: true,
+                        superseded: false,
+                    },
+                );
+            }
+            let record = batches.get(batch).context("File clipboard batch expired")?;
+            anyhow::ensure!(
+                record.peer == peer
+                    && record.total == *total
+                    && record.paths.len() == *index as usize,
+                "Invalid file clipboard sequence"
+            );
+            batches.get_mut(batch).unwrap().active = true;
+            Some((batch.clone(), *index, *total))
+        } else {
+            None
+        };
         let mut stop = self.stop.subscribe();
         if is_file {
             self.transfer(TransferStatus {
@@ -409,6 +529,9 @@ impl Service {
             };
             self.decisions.lock().unwrap().remove(&id);
             if !accepted {
+                if let Some((batch, _, _)) = &batch {
+                    self.file_batches.lock().unwrap().remove(batch);
+                }
                 self.progress(&id, 0, "declined");
                 writer
                     .send(&Message::BlobAccept {
@@ -429,7 +552,7 @@ impl Service {
             writer.send(&Message::BlobAccept{id:id.clone(),accepted:true}).await?;
             let mut memory=vec![];let mut offset=0u64;let mut digest=Sha256::new();loop {
                 anyhow::ensure!(!self.cancelled.lock().unwrap().contains(&id),"Transfer cancelled");
-                let still_allowed={let c=self.config.lock().unwrap();self.session_available.load(std::sync::atomic::Ordering::SeqCst)&&!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files}else{p.allow_clipboard})};anyhow::ensure!(still_allowed,"Sharing permission revoked");
+                let still_allowed={let c=self.config.lock().unwrap();self.session_available.load(std::sync::atomic::Ordering::SeqCst)&&!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files&&(batch.is_none()||(p.allow_clipboard&&c.settings.clipboard_files))}else{p.allow_clipboard})};anyhow::ensure!(still_allowed,"Sharing permission revoked");
                 let message=tokio::select!{_=stop.changed()=>anyhow::bail!("Application stopped"),_=self.wait_cancel(&id)=>anyhow::bail!("Transfer cancelled"),r=tokio::time::timeout(Duration::from_secs(20),reader.recv())=>r.context("Transfer stalled")??};
                 match message {
                     Message::BlobChunk{id:got,offset:at,data}=>{
@@ -440,7 +563,7 @@ impl Service {
                 }
             }
             anyhow::ensure!(hex::encode(digest.finalize())==hash,"Integrity verification failed; file was not saved");
-            {let c=self.config.lock().unwrap();anyhow::ensure!(self.session_available.load(std::sync::atomic::Ordering::SeqCst)&&!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files}else{p.allow_clipboard}),"Sharing permission revoked before publication");}
+            {let c=self.config.lock().unwrap();anyhow::ensure!(self.session_available.load(std::sync::atomic::Ordering::SeqCst)&&!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files&&(batch.is_none()||(p.allow_clipboard&&c.settings.clipboard_files))}else{p.allow_clipboard}),"Sharing permission revoked before publication");}
             if let Some(mut p)=partial {
                 let file=p.file.take().unwrap();file.sync_all().await?;drop(file);let dir=p.path.parent().unwrap();let mut destination=None;
                 for n in 0..10000 {let candidate=dir.join(if n==0{name.clone()}else{let path=Path::new(&name);let stem=path.file_stem().and_then(|v|v.to_str()).unwrap_or("file");let ext=path.extension().and_then(|v|v.to_str());match ext{Some(ext)=>format!("{stem} ({n}).{ext}"),None=>format!("{stem} ({n})")}});
@@ -463,6 +586,67 @@ impl Service {
         let _ = writer.send(&confirmation).await;
         if is_file {
             self.finish(&id, &result);
+        }
+        let publication: Result<()> = (|| {
+            if let Some((batch, _, total)) = batch {
+                if result.is_err() {
+                    self.file_batches.lock().unwrap().remove(&batch);
+                } else {
+                    let path = self
+                        .state
+                        .lock()
+                        .unwrap()
+                        .transfers
+                        .get(&id)
+                        .and_then(|t| t.saved_path.as_ref())
+                        .map(PathBuf::from)
+                        .context("Verified file unavailable")?;
+                    // Serialize publication with new offers; an older batch must
+                    // not win over a more recent copy from another controller.
+                    let mut batches = self.file_batches.lock().unwrap();
+                    let completed = {
+                        let record = batches
+                            .get_mut(&batch)
+                            .context("File clipboard batch expired")?;
+                        record.paths.push(path);
+                        record.active = false;
+                        record.created = std::time::Instant::now();
+                        if record.paths.len() == total as usize {
+                            batches.remove(&batch)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(record) = completed {
+                        // Preserve clipboard edits made while consent/transfer was pending.
+                        let unchanged = !record.superseded
+                            && self.backend.clipboard_revision() == record.revision
+                            && file_list_hash(&self.backend.read_file_clipboard()?)
+                                == record.original;
+                        if unchanged {
+                            let c = self.config.lock().unwrap();
+                            if !c.settings.paused
+                                && c.settings.clipboard_files
+                                && c.peers
+                                    .get(&peer)
+                                    .is_some_and(|p| p.allow_files && p.allow_clipboard)
+                            {
+                                let mut seen = self.file_clipboard_hash.lock().unwrap();
+                                self.backend.write_file_clipboard(&record.paths)?;
+                                *seen = file_list_hash(&record.paths);
+                            }
+                        } else {
+                            self.note("Received copied files are ready in File transfers; your newer clipboard was preserved.".into());
+                        }
+                    }
+                }
+            }
+            Ok(())
+        })();
+        if publication.is_err() {
+            // A verified file remains useful even when the OS clipboard is busy
+            // or unavailable. Surface the fallback instead of silently failing.
+            self.note("Files were received and verified, but the system file clipboard could not be updated. Open File transfers and copy the received files there.".into());
         }
         result
     }

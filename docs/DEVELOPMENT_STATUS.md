@@ -4,7 +4,10 @@ The project remains a development alpha. This pass continues the existing Rust/
 Tauri implementation and preserves peer identities, explicit approval, pinned
 keys, encrypted transport, separate bulk traffic, and emergency release.
 
-## Implemented in this pass
+Earlier sections record the initial setup checkpoint. The current **0.1.2**
+implementation and delivery evidence are recorded at the end of this document.
+
+## Implemented in the initial setup
 
 - Reconnect only paired identities; verify the expected key identity before
   exchanging introductions. Prefer remembered endpoints; keep bounded mDNS
@@ -132,3 +135,122 @@ layout coverage, and privileged Windows secure desktop support remain unfinished
 Signing/notarization, verified signed updates, measured latency/throughput and
 independent security review require additional infrastructure or external work.
 Do not infer those capabilities from passing protocol or browser tests.
+
+## 0.1.1 three-screen input repair — 2026-10-09
+
+The first physical Windows/Mac report reproduced wrong monitor selection,
+Windows local wraparound and duplicate source interaction. New regressions
+confirm enumeration-order placement, local-to-local warping and lost held input
+between remote monitors. These are corrected in source; 47 Mac Rust tests,
+11 browser tests, frontend build and strict core/CLI Clippy for Windows and both
+Mac targets pass locally. Native Mac filter tests construct isolated events
+without injecting them into the user's desktop. Mapping, cursor suppression
+and lease changes need a physical retest of both updated apps. BUG-010 remains
+open for that confirmation; no new completed physical acceptance claim is made.
+
+Version 0.1.1 retains pairing identity/configuration and protocol version 1.
+Saved arrangements are preserved and repaired explicitly using OS display order;
+configure the same arrangement on each computer. Mac source cursor suppression
+is balanced on release; native aggregate suppression diagnostics contain no keys,
+clipboard data or file contents. Hosted Windows installer generation is currently
+blocked before jobs start by GitHub's account payment/spending-limit restriction;
+no billing configuration or financial commitment has been changed.
+
+The local 0.1.1 Mac app is now installed in `~/Applications/The Hopping Cursor.app`
+and signed with an existing Apple Development identity via an ignored local
+override. Strict signature verification passes. After refreshing only this
+app's existing privacy grants, Diagnostics shows capture, injection and clipboard
+access Available, one paired/connected PC and the unchanged public identity.
+The live native tap is enabled at the active session location with filtering
+options 0. Resume, Bring input here and Pause pass native IPC checks. The saved
+Mac layout now places the PC primary adjacent to the Mac, followed by its
+secondary monitor. Sharing is left paused for the two-updated-app trial.
+
+[Hosted run 37895937871](https://github.com/Itskorrah/The-hopping-cursor/actions/runs/37895937871)
+again finished all five jobs with zero executed steps because of the account
+restriction. With explicit owner approval for Microsoft's build-tool licence,
+a local Tauri/cargo-xwin MSVC/NSIS build produced the
+[Windows 0.1.1 test release](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.1-test.1)
+from source commit `56cdf1e`. Both executable version resources are 0.1.1.0;
+the app is AMD64. The installer passes NSIS archive integrity checks. Extracted
+application bytes match the build allowing only the documented `UNK`→`NSS`
+bundle marker, and uploaded ZIP hashes are checked. The package includes license,
+notices, hashes and build provenance. Missing CRT PDB warnings affect debugging
+symbols; the compile/link/package completed. Windows native runtime checks and
+physical input acceptance have not run for this cross-build. It is unsigned;
+production distribution remains unfinished. See [build steps](BUILDING.md).
+
+## 0.1.2 shared desk — 2026-10-09
+
+Physical user feedback for **0.1.1**: Mac trackpad → Windows, typing, Enter and
+text copy/paste were useful and fairly smooth. Windows physical mouse/keyboard
+→ Mac failed, and the Windows pointer remained visible after returning to Mac.
+The prior automated routing test did not exercise Windows' clipped native mouse
+motion. No exact OS root cause was remotely reproduced on the PC.
+
+**0.1.2** adds a Windows Raw Input sink, dedicated parking-window cursor ownership,
+authenticated focus coordination, idle-keyboard routing, accepted layout sharing
+and opt-in verified file clipboard batches. A new regression exposed that urgent
+Leave invalidation discarded a queued focus announcement; reordering fixes it.
+New-controller Enter no longer echoes Leave back to its sender. Disconnects clear
+synthetic shared keys, and physical keys on the destination preserve its inbound
+mouse lease. Clipboard checks cover consent, echo, batch supersession and newer
+recipient clipboard preservation. UI adds honest controller/destination/visibility
+state and native chrome conventions.
+
+Local verification: **55 Rust tests (21 unit / 34 encrypted integration)**,
+**14 Playwright browser tests**, TypeScript/Vite, strict core/CLI Clippy on
+Apple Silicon, Intel Mac and Windows x64, Rustfmt and parser harness compile pass.
+Dedicated multicast discovery remains an ignored separate check; no new parser
+fuzz campaign or end-to-end latency benchmark was performed for this pass.
+Windows native runtime is not exercised by cross-checks. The release checklist
+in TEST_0.1.2.md is still pending. Native edge file dragging, folders/promises,
+privileged desktops, signed production distribution and external review remain
+unfinished. This branch is for controlled test delivery and is not merged into main.
+
+Startup sampling traced the local 0.1.2 launch wait to SecItemCopyMatching in
+macOS SecurityAgent. Engine startup now runs on a dedicated background thread;
+IPC fails closed until ready, while the window/tray and Quit remain responsive.
+An IPC-mocked browser check confirms no sample computers appear during this wait.
+No Keychain approval, password bypass or new identity fallback was automated.
+Verified received files survive OS clipboard publication failure, with a visible
+diagnostic fallback; its encrypted transfer regression passes.
+
+### 0.1.2 delivery checkpoint
+
+The refreshed Apple Development-signed local Mac app verifies strictly and opens
+with the unchanged public identity and one saved PC pairing. Diagnostics shows
+capture, injection and clipboard Available; Bring input here succeeds via native
+IPC. Sharing remains paused. An incoming old PC connection is explicitly rejected
+for protocol mismatch; both computers must update. The protected startup wait
+is covered by the IPC mock; no human password entry was automated.
+
+The [Windows test release](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.2-test.1)
+is built from `049d2ca556c90e222cc0d874c715c0d3257a510b`. Its AMD64 application
+and NSIS installer report 0.1.2.0. Archive integrity and extracted application
+bytes pass with only the documented NSIS marker mutation. The uploaded ZIP and
+GitHub download round trip match SHA-256
+`b51b22c1ddeb44f19434bf846caa4d90e8c3f527ca6a89cfe461c923c1fd037d`.
+The package includes license, notices, build provenance and physical checklist.
+The installer is unsigned; actual Windows installation/runtime remains pending.
+Hosted run 37920694980 completed all five jobs with **zero executed steps**;
+its annotation reports failed recent account payments or a spending limit.
+Local builds used the already-authorized SDK route, without billing changes.
+PR #2 remains draft and the branch is unmerged pending physical acceptance.
+
+## 2026-10-10 alpha checkpoint and Windows handoff
+
+The user installed the Windows 0.1.2 package and reports that physical mice and
+keyboards now control the other computer in both directions. Mac-source input
+feels smooth. Windows-source motion is clunky, E opens the Mac emoji picker,
+and setup needed reconnect/Pause/Resume experimentation. These are tracked as
+BUG-018–020; no new input fixes or benchmark are claimed. Cursor rendering, held
+input, broad reliability and native file paste/drag acceptance remain pending.
+
+The owner authorized consolidating 0.1.2 into main as a development alpha and
+continuing on Windows. The README uses an unedited native window screenshot
+with the real PC connected; the sidebar covers the visible window height.
+WINDOWS_HANDOFF.md includes prerequisites, reproduction, evidence limits,
+security constraints, build/test commands and a first Codex prompt. The installed
+0.1.2 binaries are unchanged by this documentation pass. Historical draft/
+unmerged notes above describe earlier checkpoints, not the current alpha merge.

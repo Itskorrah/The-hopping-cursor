@@ -77,3 +77,49 @@ checks, and the existing public identity is preserved. Packaging now validates
 the app inside each finished DMG, with read-only mounting and cleanup on failure;
 the guard rejects the earlier invalid package. Developer ID/AuthentiCode signing,
 notarization and physical peer control still remain gaps.
+
+- 2026-10-09 / 0.1.1: reproduce monitor enumeration order, Windows local
+  wraparound and same-peer held-drag loss with failing tests; correct routing,
+  add native source cursor lifecycle/unmapped-key suppression and private Mac
+  injection source; label primary displays and add OS-order repair. 47 Rust /
+  11 browser checks pass locally, cross-target strict Clippy passes. Physical
+  duplicate-click validation and updated Windows installer remain pending.
+
+- 2026-10-09 / 0.1.1 delivery: install the locally Apple Development-signed Mac
+  app in the user's Applications folder, refresh its existing grants and verify
+  all three native permission checks plus recovery IPC; public identity and PC
+  pairing remain intact. Hosted run 37895937871 is blocked with zero steps.
+  With owner-approved Microsoft SDK terms, cross-build the Windows MSVC/NSIS
+  package locally, check archive/architecture/version and exact bundled bytes
+  accounting only for Tauri's NSIS marker, and publish the private test release
+  v0.1.1-test.1. Physical duplicate-input and two-way Windows acceptance remain open.
+
+2026-10-09 — 0.1.2: Windows Raw Input motion sink and cursor parking window;
+authenticated coordinated cursor focus; idle keyboard routing; physical-controller
+reclaim; no echoed Leave to a new controller; ownership announcement after urgent
+queue invalidation. Accepted arrangement sharing protects saved local work.
+Opt-in native copied-file batches use consented verified streams, prevent bounce
+and preserve newer clipboard edits. Diagnostics identify controller/destination;
+UI gains arrangement review/file clipboard and native chrome conventions.
+55 Rust / 14 browser checks pass; native runtime retest is pending. Native
+Finder/Explorer edge drag, folders/file promises, measured latency, signing and
+production updates remain unfinished. See docs/TEST_0.1.2.md.
+
+0.1.2 delivery follow-up: startup sampling located the Keychain wait on the UI
+thread; protected startup moved to a background thread with fail-closed IPC and
+a Quit control. OS file clipboard failure now preserves received files and
+reports a usable transfer-page fallback. New transfer and startup-IPC regressions
+bring verification to 55 Rust and 14 browser tests.
+
+0.1.2 package checkpoint: signed local Mac app opens with existing identity/peer
+and available permissions; native recovery IPC passes and sharing stays paused.
+Windows NSIS archive/AMD64/version/extracted bytes verify. Publish private
+v0.1.2-test.1 from 049d2ca and verify uploaded/downloaded ZIP hash. Hosted run
+37920694980 executes no steps under the existing account restriction. PR #2
+remains draft pending the physical Windows→Mac/cursor/file-clipboard retest.
+
+2026-10-10: capture the actual connected native Mac 0.1.2 window for README, with
+full-height sidebar and no image editing. Record user-confirmed basic two-way
+control plus open E/emoji, Windows-source feel and setup defects. Prepare
+docs/WINDOWS_HANDOFF.md and consolidate the owner-authorized alpha checkpoint
+into main. No protocol/native/UI implementation or installer changes in this pass.
