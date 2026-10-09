@@ -5,10 +5,10 @@ offset/hidden topology, invalid layouts, safe filenames, actual two-service
 encrypted pairing and trust, acceptance/refusal, duplicate files and byte
 integrity, clipboard exchange, held-key handoff, emergency release, disconnect,
 revocation, quotas, and diagnostics exclusion. The suite currently contains
-42 Rust tests on macOS: 19 unit/security/native tests and 23 encrypted-network integration tests.
+55 Rust tests on macOS: 21 unit/security/native tests and 34 encrypted-network integration tests.
 Loopback services disable multicast; a separate opt-in two-service mDNS test
 checks untrusted discovery and rename refresh. Linux omits the two native pasteboard and two native-store migration tests
-(38 tests total). Windows also includes a DPAPI
+(counts differ by platform; record native results). Windows also includes a DPAPI
 round-trip/tamper/non-overwrite test and an explicitly opted-in disposable-runner
 CF_HDROP test; it never replaces a developer clipboard during default tests.
 Additional regressions reject ciphertext tampering/replay, malformed/trailing
@@ -22,9 +22,9 @@ mandatory pairing comparison, keyboard arrangement overlap errors, hidden
 display persistence, five-page axe accessibility checks, and 390px viewport.
 Console errors and 5xx responses fail tests. Profiles and permission controls
 also receive direct regression coverage, along with monitor shortcut controls.
-All 10 browser tests passed locally, including axe checks across all five pages.
+All 14 browser tests passed locally, including axe checks across all five pages.
 
-Not run across physical peers: native input, UIPI, clipboard
+Remaining physical acceptance beyond the user-reported basic two-way handoff: held-input/cursor recovery, UIPI, clipboard
 HTML/PNG interoperability, mixed DPI, OS window drag/drop, tray behavior,
 sleep/wake/hotplug, long soak tests, end-to-end latency/throughput. See
 `docs/PLATFORM_TESTING.md` for actionable steps and pass criteria.
@@ -52,3 +52,11 @@ reproduction and the earlier Linux resource-cap failure. Mac CI also repeats
 both isolated pasteboard checks twenty times per job after BUG-007.
 This does not establish native injection, cross-app file paste, OS lock/wake
 synchronization, or exhaustive protocol security.
+
+2026-10-10 Windows handoff: user reports successful basic 0.1.2 physical control
+in both directions, with Mac-source movement/typing smooth. BUG-018 (E/emoji),
+BUG-019 (Windows-source motion) and BUG-020 (initial readiness/recovery) remain
+open; no new fixes or native benchmark were run during documentation/merge work.
+The README screenshot is a real native app window with the PC connected, visually
+checked for full-height sidebar. See docs/WINDOWS_HANDOFF.md for reproduction and
+native test priorities; this checkpoint is an owner-authorized alpha merge.

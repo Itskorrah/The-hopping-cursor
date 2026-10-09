@@ -117,3 +117,9 @@ Windows NSIS archive/AMD64/version/extracted bytes verify. Publish private
 v0.1.2-test.1 from 049d2ca and verify uploaded/downloaded ZIP hash. Hosted run
 37920694980 executes no steps under the existing account restriction. PR #2
 remains draft pending the physical Windows→Mac/cursor/file-clipboard retest.
+
+2026-10-10: capture the actual connected native Mac 0.1.2 window for README, with
+full-height sidebar and no image editing. Record user-confirmed basic two-way
+control plus open E/emoji, Windows-source feel and setup defects. Prepare
+docs/WINDOWS_HANDOFF.md and consolidate the owner-authorized alpha checkpoint
+into main. No protocol/native/UI implementation or installer changes in this pass.

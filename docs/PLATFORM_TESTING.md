@@ -60,9 +60,9 @@ An installer build is not evidence that input behavior has passed this checklist
     and packet-loss conditions. Heartbeat RTT is a different measurement.
 
 Still out of scope: UAC/Windows login/secure desktop input, native Finder/Explorer
-file dragging across monitor edges, automatic file-clipboard synchronization, dimming, session
+file dragging across monitor edges, folder/file-promise support, dimming, session
 lock/wake synchronization, relative/raw gaming input, and system-wide media keys. Explicit file-list clipboard
-bridging is implemented but still needs the cross-application checks above.
+bridging and opt-in verified regular-file synchronization are implemented but still need cross-application checks. See TEST_0.1.2.md and WINDOWS_HANDOFF.md for current acceptance and user-reported open defects.
 
 ## Three-screen regression retest (0.1.1)
 

@@ -2,9 +2,17 @@
 
 A desktop application for sharing a mouse, keyboard, clipboard, and files between your own computers on a local network. A Rust engine, native Windows and macOS input adapters, and a Tauri/React control interface. Independently implemented from public product research; no proprietary code or assets used.
 
-**Status: development alpha.** The encrypted engine and desktop controls are implemented. Windows x64 and Intel/Apple Silicon Mac installers have built successfully on native GitHub runners. Most engine tests use an in-memory OS adapter; isolated Mac pasteboard tests exercise native APIs; actual Windows/macOS input and permission behavior still require the hardware checklist below. This is not yet a production replacement for a mature software KVM.
+**Status: development alpha.** The encrypted engine and desktop controls are implemented. Windows x64 and Intel/Apple Silicon Mac installers have built successfully on native GitHub runners. Most engine tests use an in-memory OS adapter; isolated Mac pasteboard tests exercise native APIs; user testing now confirms basic Windows↔Mac control, while broader input/permission acceptance still requires the hardware checklist below. This is not yet a production replacement for a mature software KVM.
 
-![Workspace interface preview with sample computers](docs/images/workspace.png)
+![Native Mac 0.1.2 workspace with a connected Windows PC and three arranged displays](docs/images/workspace.jpg)
+
+Actual macOS app window captured on 2026-10-10, with a connected two-monitor PC.
+The sidebar fills the window height; this is not the browser sample preview.
+
+**Continue development on Windows:** [Windows handoff](docs/WINDOWS_HANDOFF.md).
+The latest 0.1.2 source is consolidated into `main` as an alpha checkpoint.
+User testing confirms basic control in both directions. Windows→Mac mouse feel,
+the E/emoji keyboard bug and connection/setup friction remain open; see below.
 
 ## What's built
 
@@ -45,7 +53,7 @@ ID signing is still needed for dependable permission continuity and distribution
 1. Open Computers on both machines. Discovery uses mDNS; if needed, use Add computer with a local address such as `192.168.1.20:24810`.
 2. Pair the computer, compare the **entire safety code** on both screens, and approve it on **both**. One-sided approval does not permit sharing.
 3. Arrange your displays with touching edges and save. Click **Share arrangement**, then review and **Apply arrangement** in Workspace on the other computer. Sharing never silently replaces its saved layout.
-4. Move toward a shared edge. Your keyboard follows the cursor. Use **Ctrl+Alt+Escape** on the source computer to bring input back immediately.
+4. Confirm both apps are 0.1.2 and **Resume** sharing on both if paused. Move toward a shared edge. Your keyboard follows the cursor. Use **Ctrl+Alt+Escape** on the source computer to bring input back immediately.
 5. Send files from File transfers or drop them into the app window. The receiver accepts the offer. Completed files go to the receiving folder in Preferences. To send files copied in Finder/Explorer, use **Send copied files**. A verified received file offers **Copy file for pasting** into another folder.
 
 Select a monitor to assign **Ctrl+Alt+1–9** hop shortcuts or use **Jump here**. Save named layout profiles for different desks. Pair permissions separately control input, clipboard, and files. **Pause** returns input locally, stops sharing, and cancels pending/active file transfers.
@@ -72,7 +80,9 @@ codesign --verify --deep --strict --verbose=2 "target/debug/bundle/macos/The Hop
 
 The ad hoc default follows [Tauri's signing guidance](https://v2.tauri.app/distribute/sign/macos/#ad-hoc-signing).
 
-Or open [GitHub Actions](https://github.com/Itskorrah/The-hopping-cursor/actions), select a successful **Build and verify** run, and download the Windows x64, macOS ARM64, or macOS Intel artifact. The workflow builds on native runners. Successful build artifacts are development packages, not signed public releases.
+For the current Windows test package, download [0.1.2-test.1](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.2-test.1), extract the ZIP and run its setup executable after fully quitting the previous app. Keep identities/settings. It is unsigned; its local cross-build provenance is included. Both computers must be updated.
+
+For historical native-runner packages, open [GitHub Actions](https://github.com/Itskorrah/The-hopping-cursor/actions), select a successful **Build and verify** run, and download the Windows x64, macOS ARM64, or macOS Intel artifact. The workflow builds on native runners. Successful build artifacts are development packages, not signed public releases.
 
 Extract the artifact and find the `.exe` or `.dmg` under `target/.../release/bundle/`. The archive also includes the application license and dependency notices.
 
@@ -135,7 +145,7 @@ The Replica pack was installed from [your repository](https://github.com/Itskorr
 
 Original application code is MIT licensed. Installed skills preserve their own licenses; dependencies and fonts retain their respective licenses. [Bundled notices](apps/desktop/public/THIRD_PARTY_NOTICES.txt) accompany installer artifacts and the app assets. Regenerate with `python3 scripts/generate-notices.py` after changing dependencies. The name is provisional; trademark/domain checks have not been performed.
 
-## Local verification (2026-10-09)
+## Initial setup verification (historical, 2026-10-09)
 
 42 Rust tests and 10 Playwright browser tests pass on Apple Silicon macOS.
 Strict Clippy passes locally, and the Windows/Intel adapters are cross-checked.
@@ -161,7 +171,7 @@ A bounded AddressSanitizer parser fuzz run completed 5,299,006 cases in 181 seco
 The CLI supports `daemon --no-discovery` for manual/remembered connections.
 See [docs/DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md) for detailed evidence.
 
-## Input-routing update (0.1.1, 2026-10-09)
+## Input-routing update (historical 0.1.1, 2026-10-09)
 
 The three-screen Mac → Windows primary → Windows secondary hardware trial
 exposed incorrect monitor order, local Windows wraparound, and duplicate Mac
@@ -189,7 +199,7 @@ is available from the repair branch. It was cross-built locally on macOS because
 GitHub blocked hosted jobs before they started. Archive integrity, packaged app
 bytes (allowing only Tauri's NSIS bundle marker), x64 architecture and 0.1.1
 version resources pass verification. It is unsigned and still needs Windows
-installation/native input testing; the repair has not been merged into main.
+installation/native input testing at that checkpoint. It is superseded by 0.1.2.
 The ZIP includes update instructions, license, notices and build metadata.
 No paid runners or billing changes were used.
 
@@ -199,7 +209,7 @@ Both apps must use **0.1.2**. Protocol 2 adds authenticated cursor focus,
 idle-keyboard forwarding and explicit arrangement offers. Old protocol 1 apps
 are rejected; pairings and layouts are retained. The latest test installer is
 [Windows 0.1.2](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.2-test.1).
-This is a test prerelease on `codex/exclusive-input-routing`, not a production release.
+The implementation is consolidated into `main` as a development alpha; the downloadable package remains a test prerelease.
 
 Windows reads hardware mouse deltas through Raw Input so motion continues at a
 clipped screen edge. Hooks still suppress ordinary source clicks/keys. A tiny
@@ -222,8 +232,13 @@ cut/move semantics and cross-screen native dragging are still unsupported.
 55 Rust tests, 14 browser tests, strict Clippy for Windows and both Mac targets,
 Rustfmt, frontend build and parser harness compile checks pass locally.
 User-reported 0.1.1 Mac→Windows trackpad/typing/Enter/text copy-paste worked;
-Windows→Mac and the stationary Windows cursor did not. The 0.1.2 changes need a
-fresh physical retest, including permission continuity and high-DPI motion.
+Windows→Mac and the stationary Windows cursor did not at that checkpoint.
+On 2026-10-10 the user confirmed 0.1.2 basic control now works in both directions.
+Mac→Windows feels smooth; Windows→Mac mouse movement feels clunky and pressing
+E on the Windows keyboard opens the Mac emoji picker. Initial connection required
+reconnect and Pause/Resume experimentation. These remain open bugs, not completed
+fixes. Explicit single-cursor, held-input, high-DPI, clipboard-file and recovery
+acceptance remains pending.
 See [the update checklist](docs/TEST_0.1.2.md) and
 [native drag research](docs/NATIVE_DRAG_DESIGN.md). No new latency benchmark or
 Windows secure-desktop support is claimed.
@@ -233,3 +248,13 @@ approval is pending, the window shows startup guidance and Quit remains availabl
 Identity access failures keep sharing unavailable and preserve the existing key.
 If the OS file clipboard is busy after receiving a verified batch, Diagnostics
 explains that the saved files remain available through File transfers.
+
+## Windows continuation (2026-10-10)
+
+Start from current `main`; [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md)
+contains prerequisites, commands, source pointers, known bugs and a reusable
+Codex prompt. Priorities are keyboard correctness (BUG-018), Windows→Mac pointer
+consistency (BUG-019), and clear, dependable setup/reconnection (BUG-020). The Mac
+remains the receiver/test partner; Windows-local testing does not establish Mac
+injection correctness. Hosted CI is currently account-blocked before jobs start;
+use local verification/builds without changing billing.

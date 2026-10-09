@@ -3,8 +3,8 @@ Encrypted transport,security,must,yes,yes,Noise XX frames; integration tested; e
 Explicit authenticated pairing,security,must,yes,yes,Compare full code and approve both sides; pinning and revocation tested
 Automatic discovery,network,must,yes,yes,mDNS plus manual private IP; physical isolated-network testing pending
 Reconnect and recovery,network,must,yes,yes,Heartbeat watchdog; integration recovery and held keys tested
-Edge cursor hopping,input,must,yes,partial,0.1.2 Raw Input edge motion and coordinated cursor focus; controller takeover regressions; physical retest pending
-Keyboard sharing and modifier mapping,input,must,yes,partial,HID mapping and idle-peer keyboards following focus; disconnect cleanup tested; native and international layout tests pending
+Edge cursor hopping,input,must,yes,partial,0.1.2 Raw Input edge motion and coordinated cursor focus; controller takeover regressions; user confirms basic two-way 0.1.2 control; Windows-source feel and broader physical acceptance pending
+Keyboard sharing and modifier mapping,input,must,yes,partial,HID mapping and idle-peer keyboards following focus; disconnect cleanup tested; basic two-way typing user-reported; Windows E opens Mac emoji picker; native and international layout tests pending
 Multiple display arrangement,layout,must,yes,partial,Offset stacked hidden and reversed enumeration tested; primary labels and OS-order repair; explicit accepted arrangement sharing; physical retest pending
 Clipboard text,clipboard,must,yes,partial,Real encrypted exchange tested with memory adapter; OS pasteboard tests pending
 Clipboard images and formatting,clipboard,should,yes,partial,PNG/HTML adapters compile; cross-app OS tests pending

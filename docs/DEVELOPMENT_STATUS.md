@@ -237,3 +237,20 @@ Hosted run 37920694980 completed all five jobs with **zero executed steps**;
 its annotation reports failed recent account payments or a spending limit.
 Local builds used the already-authorized SDK route, without billing changes.
 PR #2 remains draft and the branch is unmerged pending physical acceptance.
+
+## 2026-10-10 alpha checkpoint and Windows handoff
+
+The user installed the Windows 0.1.2 package and reports that physical mice and
+keyboards now control the other computer in both directions. Mac-source input
+feels smooth. Windows-source motion is clunky, E opens the Mac emoji picker,
+and setup needed reconnect/Pause/Resume experimentation. These are tracked as
+BUG-018–020; no new input fixes or benchmark are claimed. Cursor rendering, held
+input, broad reliability and native file paste/drag acceptance remain pending.
+
+The owner authorized consolidating 0.1.2 into main as a development alpha and
+continuing on Windows. The README uses an unedited native window screenshot
+with the real PC connected; the sidebar covers the visible window height.
+WINDOWS_HANDOFF.md includes prerequisites, reproduction, evidence limits,
+security constraints, build/test commands and a first Codex prompt. The installed
+0.1.2 binaries are unchanged by this documentation pass. Historical draft/
+unmerged notes above describe earlier checkpoints, not the current alpha merge.

@@ -182,7 +182,7 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
 
 ### BUG-014: Windows physical control cannot enter Mac
 
-- Severity: S1, physical acceptance open.
+- Severity: originally S1; basic handoff user-verified on 0.1.2, broader acceptance open.
 - Evidence: user reports failure in the 0.1.1 three-screen trial.
 - Finding: Windows capture derives motion from clipped pointer coordinates;
   layouts were independently saved. Neither is remotely established as the sole
@@ -190,7 +190,9 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
 - Change: Raw Input deltas continue at the edge; explicit arrangement sharing
   lets the recipient apply the same geometry. Both app versions must be 0.1.2.
 - Status: both-direction encrypted engine regressions and Windows strict compile
-  pass; real Windows hooks/Mac injection acceptance is pending. No production merge.
+  pass. On 2026-10-10 the user confirms basic physical handoff now works in both
+  directions. Remaining typing/motion/setup defects are BUG-018–020. This permits
+  the owner-authorized alpha checkpoint merge; exhaustive native QA is pending.
 
 ### BUG-015: Physical takeover loses focus announcement
 
@@ -224,3 +226,46 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
   The refreshed signed native Mac app opens with the existing identity and
   all three permissions Available. Actual pending OS-dialog behavior remains
   represented by a mock; no password/security bypass was performed.
+
+### BUG-018: Windows E opens macOS emoji picker
+
+- Severity: S2; keyboard correctness, priority first.
+- Evidence: user physical 0.1.2 report on 2026-10-10; not independently reproduced
+  by this Mac agent. Windows control → blank Mac editor → press unmodified E.
+- Expected: letter E/e. Actual: emoji picker. Other typing and bidirectional
+  handoff work. Mac injection preserves function flags; Fn/Globe+E is an OS
+  shortcut. Unwanted Fn state is a hypothesis, not a confirmed root cause.
+- Status: open, handed to Windows with Mac receiver checks and synthetic-event
+  regression required. Do not log actual physical key contents.
+
+### BUG-019: Windows mouse movement on Mac feels clunky
+
+- Severity: S2; user-experience defect.
+- Evidence: user's 0.1.2 directional comparison; Mac→Windows smooth, Windows→Mac
+  clunky. No measured latency or independent native reproduction yet.
+- Expected: consistent precise movement. Actual: uneven feel on Windows source.
+- To check: raw-count DPI/gain, logical/physical scaling, cadence, queues and
+  injection. Do not treat sensitivity or smoothing as an established fix.
+- Status: open; native Windows investigation and physical comparative acceptance
+  pending. Preserve the successful Mac-source path.
+
+### BUG-020: Initial sharing needs repeated connection/pause actions
+
+- Severity: S3; reported workaround is reconnect plus Pause/Resume.
+- Evidence: user on 0.1.2 used Connect, disconnect/reconnect and Workspace
+  Pause/Resume before both directions worked; exact transition not reproduced.
+- Expected: approved, correctly arranged peers become ready predictably and show
+  the exact blocker if sharing is paused, not paired or lacks permissions.
+- Actual: readiness was unclear and needed experimentation.
+- Status: open. Observe startup/reconnect state before changing it; never silently
+  resume a deliberate pause or bypass pairing/layout consent.
+
+### BUG-021: README preview leaves white space below the sidebar
+
+- Severity: S4; screenshot presentation.
+- Evidence: user's old browser preview screenshot extends below the sidebar.
+  CSS fixes the sidebar to the viewport; the current native window capture fills
+  the visible height and shows actual connected devices.
+- Fix: replace docs/images/workspace.jpg with an unedited native Mac 0.1.2 window
+  screenshot, and label its source/date in README. No CSS or input code changed.
+- Status: visually verified on 2026-10-10; documentation fix in this handoff commit.
