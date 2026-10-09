@@ -8,6 +8,11 @@ An installer build is not evidence that input behavior has passed this checklist
    Grant macOS Accessibility and Input Monitoring; allow Local Network access.
    Restart after permission changes. Allow TCP 24810 and mDNS UDP 5353 on the
    private firewall profile. Do not run two app/CLI engines on the same port.
+   Verify the Mac app bundle with `codesign --verify --deep --strict --verbose=2`.
+   Ad hoc builds may need their permission entry refreshed after rebuilding;
+   confirm capture/injection in Diagnostics rather than relying on switches alone.
+   Fully quit with ⌘Q before reopening. Check locked Keychain recovery without
+   deleting identities or weakening their access controls.
 2. Confirm discovery. Test local IP connection when multicast is blocked.
    Compare complete safety codes on both screens, approve both, confirm connected.
    An unapproved device must never move the cursor, paste, or save a file.

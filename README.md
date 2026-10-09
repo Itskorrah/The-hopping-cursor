@@ -36,6 +36,12 @@ npm run desktop
 
 On macOS, use **Grant permissions / Retry** to request **Accessibility** and **Input Monitoring**, and allow **Local Network** access when prompted. Approve these in System Settings, then retry or restart if macOS requests it. Start on a private test LAN with non-sensitive text and files. Use a local mouse on each computer during testing.
 
+Mac bundles use an ad hoc signature for bundle integrity. They have no verified
+publisher or notarization. After rebuilding, macOS may require you to remove and
+re-add this app's privacy permission entry. Fully quit with **⌘Q** before reopening;
+closing the window keeps the engine running. Stable Apple Development / Developer
+ID signing is still needed for dependable permission continuity and distribution.
+
 1. Open Computers on both machines. Discovery uses mDNS; if needed, use Add computer with a local address such as `192.168.1.20:24810`.
 2. Pair the computer, compare the **entire safety code** on both screens, and approve it on **both**. One-sided approval does not permit sharing.
 3. Arrange your displays with touching edges and save. Each computer currently keeps its own layout; configure both if you want to drive from either side.
@@ -53,6 +59,15 @@ Build installers locally:
 ```sh
 npm run desktop:build
 ```
+
+For a local Mac debug bundle, run `npm run tauri -w apps/desktop -- build --debug --bundles app`.
+Keep signing enabled. Verify the bundle before requesting permissions:
+
+```sh
+codesign --verify --deep --strict --verbose=2 "target/debug/bundle/macos/The Hopping Cursor.app"
+```
+
+The ad hoc default follows [Tauri's signing guidance](https://v2.tauri.app/distribute/sign/macos/#ad-hoc-signing).
 
 Or open [GitHub Actions](https://github.com/Itskorrah/The-hopping-cursor/actions), select a successful **Build and verify** run, and download the Windows x64, macOS ARM64, or macOS Intel artifact. The workflow builds on native runners. Successful build artifacts are development packages, not signed public releases.
 

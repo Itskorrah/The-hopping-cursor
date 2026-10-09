@@ -88,6 +88,28 @@
   pass the full suite and twenty repeated isolated checks each. Physical Finder
   and cross-application validation remain required.
 
+### BUG-008: Accessibility switch enabled but the debug app remains untrusted
+
+- Severity: S2
+- Flow: Mac native permission setup / packaging
+- Steps: grant Accessibility to the local app, remove/re-add its entry, and
+  restart the bundle. Input Monitoring becomes available, but injection remains
+  unavailable despite the Accessibility switch being enabled.
+- Evidence: the app-specific macOS TCC log reports a code-requirement mismatch.
+  Strict bundle validation reports missing sealed resources. The earlier ARM
+  installer has the same signature defect; the Intel installer is unsigned.
+- Cause: no Mac signing identity was configured; the local `--no-sign` build
+  also bypassed bundle signing. A bare linker signature does not seal the bundle.
+- Change: explicitly configure Tauri's ad hoc identity `-`. The corrected local
+  bundle passes strict recursive verification, binds Info.plist/resources and
+  uses `com.itskorrah.hoppingcursor` as its signing identifier. This does not
+  establish a verified publisher, notarization, or stable grants across rebuilds.
+- Status: bundle correction verified locally; native permission recovery and
+  new installer signature verification are in progress. The corrected process
+  is waiting on Keychain access to its existing identity before opening.
+- Guidance: [Tauri ad hoc signing](https://v2.tauri.app/distribute/sign/macos/#ad-hoc-signing)
+  and [Apple on TCC signing identity](https://developer.apple.com/forums/thread/730043).
+
 ## To check on physical hardware
 
 OS permissions, hotplug/dock identities, native input, pasteboards, secure desktop,
