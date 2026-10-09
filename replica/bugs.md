@@ -238,6 +238,27 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
 - 0.1.3: inherited Fn/Globe and receiver modifiers are stripped; synthetic flag
   regression passes and core checks for both Mac targets. Status: mitigated,
   pending rebuilt Mac receiver and physical E/shortcut acceptance. Do not log keys.
+- Subsequent owner testing on 0.1.3: E/emoji now appears fixed. Preserve the fix;
+  broad modifier/shortcut acceptance is still separate from this observation.
+
+### BUG-022: Windows-to-Mac typing appears dependent on source text focus
+
+- Severity: S3; user-reported with a text-field workaround.
+- Owner reproduction on 0.1.3: keep the Mac field focused, start from Windows
+  desktop/non-text context, cross and type; initial typing fails. Clicking
+  Notepad/Chrome's address bar on Windows before crossing makes it succeed.
+- Expected: remote typing depends on the destination field; source text focus
+  is irrelevant. E/emoji now appears resolved in the same report.
+- Local evidence: native tagged-input focus fixture passes without text focus
+  on 0.1.3. A separate mouse-thread stall blocks its shared keyboard pump for
+  953.7 ms, and the remote lease is not queued before native handoff publishes
+  the owner. These weaknesses are confirmed; causation of the physical
+  focus-dependent failure remains unconfirmed.
+- 0.1.4: dedicated Windows keyboard pump; atomic Enter/held-state publication;
+  aggregate capture/forward/receive/apply diagnostics. Failing-before/passing-after
+  regressions, four native probes and repeated encrypted handoffs pass.
+- Status: confirmed local weaknesses fixed; **physical BUG-022 acceptance pending**.
+  See docs/TEST_0.1.4.md. No forced source focus or injection-filter relaxation.
 
 ### BUG-019: Windows mouse movement on Mac feels clunky
 

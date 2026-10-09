@@ -185,6 +185,28 @@ pub struct Snapshot {
     pub version: String,
     pub session_available: bool,
     pub suppressed_events: Option<u64>,
+    pub keyboard_diagnostics: KeyboardDiagnostics,
+}
+/// Aggregate counts only: never key identities, text, foreground app names or
+/// a timestamped event trace. Reset when the engine process restarts.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct KeyboardDiagnostics {
+    pub captured: u64,
+    pub forwarded: u64,
+    pub received: u64,
+    pub applied: u64,
+    pub rejected: u64,
+    pub native: Option<KeyboardCaptureStats>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyboardCaptureStats {
+    pub physical_events: u64,
+    pub injected_ignored: u64,
+    pub unsupported_events: u64,
+    pub longest_callback_us: u64,
+    pub slow_callbacks: u64,
+    pub last_event_had_focus: Option<bool>,
+    pub last_event_had_caret: Option<bool>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerPermissions {

@@ -54,6 +54,178 @@ async fn pair(auto_accept: bool) -> Pair {
 }
 
 #[tokio::test]
+async fn first_keyboard_packet_after_handoff_and_shared_keyboard_reaches_the_cursor_owner() {
+    let p = pair(true).await;
+    let local = p.a.snapshot().local;
+    let remote = p.b.snapshot().local;
+    for index in 0..32 {
+        p.pb.events.lock().unwrap().clear();
+        p.a.jump_to_display(&remote.id, &remote.displays[0].id)
+            .unwrap();
+        // No receive acknowledgement, extra mouse movement or source text
+        // click before the first key. The Enter/held-state barrier orders it.
+        for down in [true, false] {
+            assert!(p
+                .a
+                .capture(CapturedEvent::Input(InputEvent::Key { code: 8, down })));
+        }
+        wait(|| {
+            p.pb.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| matches!(e, InputEvent::Key { .. }))
+                .count()
+                == 2
+        })
+        .await;
+        let keys: Vec<_> =
+            p.pb.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| matches!(e, InputEvent::Key { .. }))
+                .cloned()
+                .collect();
+        assert_eq!(
+            keys,
+            vec![
+                InputEvent::Key {
+                    code: 8,
+                    down: true
+                },
+                InputEvent::Key {
+                    code: 8,
+                    down: false
+                }
+            ],
+            "First key cycle {index}"
+        );
+        // Receiver physically takes over its own pointer. The former source's
+        // keyboard must follow through SharedKey, even with no active lease.
+        assert!(!p.b.capture(CapturedEvent::Move {
+            x: 500.,
+            y: 500.,
+            dx: 1.,
+            dy: 0.
+        }));
+        wait(|| p.a.snapshot().controller_device == remote.id).await;
+        p.pb.events.lock().unwrap().clear();
+        for down in [true, false] {
+            assert!(p
+                .a
+                .capture(CapturedEvent::Input(InputEvent::Key { code: 8, down })));
+        }
+        wait(|| {
+            p.pb.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| matches!(e, InputEvent::Key { .. }))
+                .count()
+                == 2
+        })
+        .await;
+        p.b.release();
+        assert!(!p.a.capture(CapturedEvent::Move {
+            x: 100.,
+            y: 100.,
+            dx: 1.,
+            dy: 0.
+        }));
+        wait(|| p.a.snapshot().active_device == local.id).await;
+    }
+    assert_eq!(p.a.snapshot().keyboard_diagnostics.captured, 128);
+    assert_eq!(p.a.snapshot().keyboard_diagnostics.forwarded, 128);
+    wait(|| p.b.snapshot().keyboard_diagnostics.applied == 128).await;
+    let stats = p.b.snapshot().keyboard_diagnostics;
+    assert_eq!(stats.received, 128);
+    assert_eq!(stats.applied, 128);
+    assert_eq!(stats.rejected, 0);
+    let exported: serde_json::Value = serde_json::from_str(&p.a.export_diagnostics()).unwrap();
+    assert_eq!(exported["keyboard"]["captured"], 128);
+    assert!(exported["keyboard"]["native"].is_null());
+    assert_eq!(exported["keyboard"].as_object().unwrap().len(), 6);
+}
+
+#[tokio::test]
+async fn pre_handoff_held_modifier_and_first_new_key_are_forwarded_once() {
+    let p = pair(true).await;
+    let remote = p.b.snapshot().local;
+    assert!(!p.a.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 225,
+        down: true
+    })));
+    p.a.jump_to_display(&remote.id, &remote.displays[0].id)
+        .unwrap();
+    for event in [
+        InputEvent::Key {
+            code: 8,
+            down: true,
+        },
+        InputEvent::Key {
+            code: 8,
+            down: false,
+        },
+        InputEvent::Key {
+            code: 225,
+            down: false,
+        },
+    ] {
+        assert!(p.a.capture(CapturedEvent::Input(event)));
+    }
+    wait(|| {
+        p.pb.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, InputEvent::Key { .. }))
+            .count()
+            == 4
+    })
+    .await;
+    let keys: Vec<_> =
+        p.pb.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, InputEvent::Key { .. }))
+            .cloned()
+            .collect();
+    assert_eq!(
+        keys,
+        vec![
+            InputEvent::Key {
+                code: 225,
+                down: true
+            },
+            InputEvent::Key {
+                code: 8,
+                down: true
+            },
+            InputEvent::Key {
+                code: 8,
+                down: false
+            },
+            InputEvent::Key {
+                code: 225,
+                down: false
+            }
+        ]
+    );
+    p.a.release();
+    wait(|| {
+        p.pb.events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, InputEvent::ReleaseAll))
+    })
+    .await;
+    assert_eq!(p.a.snapshot().keyboard_diagnostics.forwarded, 4);
+}
+
+#[tokio::test]
 async fn failed_capture_stays_unavailable_through_session_and_display_refresh() {
     let dir = tempfile::tempdir().unwrap();
     let backend = Arc::new(Headless::default());

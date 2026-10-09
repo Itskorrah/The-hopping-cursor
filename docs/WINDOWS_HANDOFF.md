@@ -1,5 +1,25 @@
 # Windows development handoff — 2026-10-10
 
+## Latest keyboard checkpoint — 0.1.4
+
+Read [TEST_0.1.4.md](TEST_0.1.4.md) first. Owner testing says the 0.1.3 E/emoji fix
+appears successful, but initial Windows-to-Mac typing depends on first focusing
+a Windows text field. BUG-022 records this as observed behavior, not a diagnosis.
+
+The Windows keyboard hook now has a separate pump from mouse/raw/window work.
+Enter and pre-handoff held state queue under ownership lock before publishing
+the new active owner. Two previously failing regressions pass; 62 core tests,
+four native probes and 17 browser tests pass, as do strict and Mac compile checks.
+Aggregate keyboard diagnostics expose the capture/delivery stage without keys
+or typed text. Physical Windows desktop/Chrome/Notepad versus the same Mac field
+still needs acceptance. Update Mac with its existing signing setup for receiver
+counts; 0.1.3 is still protocol-compatible. No pairing/settings reset is needed.
+
+Find Skills was used to search Windows keyboard guidance; no sufficiently
+established matching specialist was installed. Native API documentation and the
+existing Tauri/Replica guidance were used. No third-party KVM implementation
+code was copied. Continue independent work around hosted billing blocks.
+
 ## Latest Windows checkpoint — 0.1.3
 
 The Windows pass is documented in [TEST_0.1.3.md](TEST_0.1.3.md). The original

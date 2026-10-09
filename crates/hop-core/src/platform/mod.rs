@@ -39,6 +39,9 @@ pub trait Platform: Send + Sync {
     fn suppressed_events(&self) -> Option<u64> {
         None
     }
+    fn keyboard_capture_stats(&self) -> Option<KeyboardCaptureStats> {
+        None
+    }
     fn inject(&self, event: &InputEvent) -> Result<()>;
     fn read_clipboard(&self) -> Result<Vec<ClipboardPart>>;
     fn clipboard_revision(&self) -> Option<u64> {
@@ -69,8 +72,12 @@ pub fn native() -> Arc<dyn Platform> {
 
 /// Real network/transfer development on Linux. This deliberately does not claim
 /// Linux input support. An in-memory clipboard enables deterministic integration tests.
+#[cfg(test)]
+type ForwardingProbe = Arc<dyn Fn(bool) + Send + Sync>;
 #[derive(Default)]
 pub struct Headless {
+    #[cfg(test)]
+    pub forwarding_probe: std::sync::Mutex<Option<ForwardingProbe>>,
     pub capture_blocked: std::sync::atomic::AtomicBool,
     pub forwarding: std::sync::atomic::AtomicBool,
     pub session_blocked: std::sync::atomic::AtomicBool,
@@ -84,6 +91,10 @@ impl Platform for Headless {
     fn set_forwarding(&self, forwarding: bool) -> Result<()> {
         self.forwarding
             .store(forwarding, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(test)]
+        if let Some(probe) = self.forwarding_probe.lock().unwrap().as_ref() {
+            probe(forwarding);
+        }
         Ok(())
     }
     fn session_available(&self) -> bool {

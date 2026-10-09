@@ -25,9 +25,22 @@ static CURSOR_HIDDEN: AtomicBool = AtomicBool::new(false);
 static PARKING: OnceLock<Mutex<Option<(POINT, POINT)>>> = OnceLock::new();
 const CURSOR_UPDATE: u32 = WM_APP + 1;
 static CALLBACK: OnceLock<Mutex<Option<CaptureCallback>>> = OnceLock::new();
+static KEYBOARD_PHYSICAL: AtomicU64 = AtomicU64::new(0);
+static KEYBOARD_INJECTED: AtomicU64 = AtomicU64::new(0);
+static KEYBOARD_UNSUPPORTED: AtomicU64 = AtomicU64::new(0);
+static KEYBOARD_LONGEST: AtomicU64 = AtomicU64::new(0);
+static KEYBOARD_SLOW: AtomicU64 = AtomicU64::new(0);
+static KEYBOARD_FOCUS: AtomicUsize = AtomicUsize::new(0);
+static KEYBOARD_CARET: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+const FOCUS_PROBE_MARKER: usize = 0x484F5054;
+#[cfg(test)]
+const MOUSE_PRESSURE_PROBE: u32 = WM_APP + 19;
 pub struct Windows {
     thread_id: AtomicU32,
     thread: Mutex<Option<JoinHandle<()>>>,
+    keyboard_thread_id: AtomicU32,
+    keyboard_thread: Mutex<Option<JoinHandle<()>>>,
     held: Mutex<BTreeSet<u16>>,
     buttons: Mutex<BTreeSet<u8>>,
     suppressed: Arc<AtomicU64>,
@@ -44,9 +57,63 @@ impl Windows {
         Self {
             thread_id: AtomicU32::new(0),
             thread: Mutex::new(None),
+            keyboard_thread_id: AtomicU32::new(0),
+            keyboard_thread: Mutex::new(None),
             held: Mutex::new(BTreeSet::new()),
             buttons: Mutex::new(BTreeSet::new()),
             suppressed: Arc::new(AtomicU64::new(0)),
+        }
+    }
+    fn stop_keyboard(&self) {
+        let id = self.keyboard_thread_id.swap(0, Ordering::SeqCst);
+        if id != 0 {
+            unsafe {
+                PostThreadMessageW(id, WM_QUIT, 0, 0);
+            }
+            if let Some(thread) = self.keyboard_thread.lock().unwrap().take() {
+                let _ = thread.join();
+            }
+        }
+    }
+}
+// Keyboard hook delivery must not queue behind mouse/window/raw-input work.
+// Each hook owns a dedicated live message pump; callbacks still share the
+// service's ordered ownership state and production injection filtering.
+fn start_keyboard() -> Result<(u32, JoinHandle<()>)> {
+    let (ready, result) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || unsafe {
+        let mut msg: MSG = std::mem::zeroed();
+        PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
+        let hook = SetWindowsHookExW(
+            WH_KEYBOARD_LL,
+            Some(keyboard_hook),
+            GetModuleHandleW(std::ptr::null()),
+            0,
+        );
+        if hook.is_null() {
+            let _ = ready.send(Err("Windows keyboard hook installation failed"));
+            return;
+        }
+        let id = windows_sys::Win32::System::Threading::GetCurrentThreadId();
+        if ready.send(Ok(id)).is_ok() {
+            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        UnhookWindowsHookEx(hook);
+    });
+    match result.recv() {
+        Ok(Ok(id)) => Ok((id, thread)),
+        error => {
+            let _ = thread.join();
+            anyhow::bail!(
+                "{}",
+                match error {
+                    Ok(Err(message)) => message,
+                    _ => "Windows keyboard thread failed",
+                }
+            );
         }
     }
 }
@@ -57,17 +124,54 @@ fn callback(event: CapturedEvent) -> bool {
 unsafe extern "system" fn keyboard_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     if code >= 0 {
         let k = &*(l as *const KBDLLHOOKSTRUCT);
-        if k.flags & LLKHF_INJECTED == 0 {
+        // The ignored native probe uses a tagged SendInput packet to exercise
+        // OS hook delivery. Production always rejects injected keyboard input.
+        #[cfg(test)]
+        let probe = k.dwExtraInfo == FOCUS_PROBE_MARKER;
+        #[cfg(not(test))]
+        let probe = false;
+        if k.flags & LLKHF_INJECTED == 0 || probe {
+            KEYBOARD_PHYSICAL.fetch_add(1, Ordering::Relaxed);
+            let started = std::time::Instant::now();
+            let mut info: GUITHREADINFO = std::mem::zeroed();
+            info.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+            let available = GetGUIThreadInfo(0, &mut info) != 0;
+            KEYBOARD_FOCUS.store(
+                if available {
+                    1 + usize::from(!info.hwndFocus.is_null())
+                } else {
+                    0
+                },
+                Ordering::Relaxed,
+            );
+            KEYBOARD_CARET.store(
+                if available {
+                    1 + usize::from(!info.hwndCaret.is_null())
+                } else {
+                    0
+                },
+                Ordering::Relaxed,
+            );
             let down = matches!(w as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
-            if let Some(hid) =
+            let event = if let Some(hid) =
                 keys::windows_to_hid(k.vkCode, k.scanCode, k.flags & LLKHF_EXTENDED != 0)
             {
-                if callback(CapturedEvent::Input(InputEvent::Key { code: hid, down })) {
-                    return 1;
-                }
-            } else if callback(CapturedEvent::Unsupported) {
+                CapturedEvent::Input(InputEvent::Key { code: hid, down })
+            } else {
+                KEYBOARD_UNSUPPORTED.fetch_add(1, Ordering::Relaxed);
+                CapturedEvent::Unsupported
+            };
+            let consumed = callback(event);
+            let micros = started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+            KEYBOARD_LONGEST.fetch_max(micros, Ordering::Relaxed);
+            if micros >= 100_000 {
+                KEYBOARD_SLOW.fetch_add(1, Ordering::Relaxed);
+            }
+            if consumed {
                 return 1;
             }
+        } else {
+            KEYBOARD_INJECTED.fetch_add(1, Ordering::Relaxed);
         }
     }
     CallNextHookEx(std::ptr::null_mut(), code, w, l)
@@ -286,6 +390,15 @@ impl Platform for Windows {
             consumed
         }));
         drop(guard);
+        let (keyboard_id, keyboard_thread) = match start_keyboard() {
+            Ok(started) => started,
+            Err(error) => {
+                *slot.lock().unwrap() = None;
+                return Err(error);
+            }
+        };
+        self.keyboard_thread_id.store(keyboard_id, Ordering::SeqCst);
+        *self.keyboard_thread.lock().unwrap() = Some(keyboard_thread);
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || unsafe {
             let module = GetModuleHandleW(std::ptr::null());
@@ -322,9 +435,8 @@ impl Platform for Windows {
                 SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
                 CURSOR_WINDOW.store(hwnd as usize, Ordering::SeqCst);
             }
-            let keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), module, 0);
             let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), module, 0);
-            if keyboard.is_null() || mouse.is_null() || !raw_ok {
+            if mouse.is_null() || !raw_ok {
                 let _ = tx.send(Err("Windows input hook installation failed".to_string()));
             } else {
                 let mut msg: MSG = std::mem::zeroed();
@@ -332,6 +444,16 @@ impl Platform for Windows {
                 let id = windows_sys::Win32::System::Threading::GetCurrentThreadId();
                 let _ = tx.send(Ok(id));
                 while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                    #[cfg(test)]
+                    if msg.message == MOUSE_PRESSURE_PROBE {
+                        callback(CapturedEvent::Move {
+                            x: 0.,
+                            y: 0.,
+                            dx: 1.,
+                            dy: 0.,
+                        });
+                        continue;
+                    }
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
@@ -351,14 +473,14 @@ impl Platform for Windows {
             if !hwnd.is_null() {
                 DestroyWindow(hwnd);
             }
-            if !keyboard.is_null() {
-                UnhookWindowsHookEx(keyboard);
-            }
             if !mouse.is_null() {
                 UnhookWindowsHookEx(mouse);
             }
         });
-        match rx.recv().context("Input thread failed")? {
+        match rx
+            .recv()
+            .unwrap_or_else(|_| Err("Windows mouse thread failed".into()))
+        {
             Ok(id) => {
                 self.thread_id.store(id, Ordering::SeqCst);
                 *self.thread.lock().unwrap() = Some(handle);
@@ -366,6 +488,7 @@ impl Platform for Windows {
             }
             Err(e) => {
                 let _ = handle.join();
+                self.stop_keyboard();
                 *slot.lock().unwrap() = None;
                 anyhow::bail!(e)
             }
@@ -381,6 +504,7 @@ impl Platform for Windows {
             if let Some(h) = self.thread.lock().unwrap().take() {
                 let _ = h.join();
             }
+            self.stop_keyboard();
             if let Some(c) = CALLBACK.get() {
                 *c.lock().unwrap() = None;
             }
@@ -441,6 +565,19 @@ impl Platform for Windows {
     }
     fn suppressed_events(&self) -> Option<u64> {
         Some(self.suppressed.load(Ordering::Relaxed))
+    }
+    fn keyboard_capture_stats(&self) -> Option<KeyboardCaptureStats> {
+        let focus = KEYBOARD_FOCUS.load(Ordering::Relaxed);
+        let caret = KEYBOARD_CARET.load(Ordering::Relaxed);
+        Some(KeyboardCaptureStats {
+            physical_events: KEYBOARD_PHYSICAL.load(Ordering::Relaxed),
+            injected_ignored: KEYBOARD_INJECTED.load(Ordering::Relaxed),
+            unsupported_events: KEYBOARD_UNSUPPORTED.load(Ordering::Relaxed),
+            longest_callback_us: KEYBOARD_LONGEST.load(Ordering::Relaxed),
+            slow_callbacks: KEYBOARD_SLOW.load(Ordering::Relaxed),
+            last_event_had_focus: (focus != 0).then_some(focus == 2),
+            last_event_had_caret: (caret != 0).then_some(caret == 2),
+        })
     }
     fn inject(&self, event: &InputEvent) -> Result<()> {
         if *event == InputEvent::ReleaseAll {
@@ -633,6 +770,245 @@ pub fn read_html() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "Interactive isolated hook-pressure probe; quit sharing engines and run serially"]
+    fn keyboard_delivery_does_not_wait_for_mouse_thread_work() {
+        let native = Windows::new();
+        let entered = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(AtomicUsize::new(0));
+        let busy = entered.clone();
+        let keys = seen.clone();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let blocked = Mutex::new(blocked);
+        native
+            .start_capture(Arc::new(move |event| {
+                match event {
+                    CapturedEvent::Move { .. } => {
+                        busy.store(true, Ordering::SeqCst);
+                        let _ = blocked
+                            .lock()
+                            .unwrap()
+                            .recv_timeout(std::time::Duration::from_secs(1));
+                    }
+                    CapturedEvent::Input(InputEvent::Key { .. }) => {
+                        keys.fetch_add(1, Ordering::SeqCst);
+                    }
+                    _ => {}
+                }
+                true
+            }))
+            .unwrap();
+        unsafe {
+            let class: Vec<_> = "STATIC\0".encode_utf16().collect();
+            let title: Vec<_> = "Hopping Cursor isolated hook pressure probe\0"
+                .encode_utf16()
+                .collect();
+            let fixture = CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                class.as_ptr(),
+                title.as_ptr(),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                100,
+                100,
+                420,
+                180,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            assert!(!fixture.is_null());
+            SetForegroundWindow(fixture);
+            assert_eq!(
+                GetForegroundWindow(),
+                fixture,
+                "Isolated pressure fixture must own foreground input"
+            );
+            PostThreadMessageW(
+                native.thread_id.load(Ordering::SeqCst),
+                MOUSE_PRESSURE_PROBE,
+                0,
+                0,
+            );
+            let started = std::time::Instant::now();
+            while !entered.load(Ordering::SeqCst)
+                && started.elapsed() < std::time::Duration::from_secs(2)
+            {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert!(entered.load(Ordering::SeqCst));
+            let start = std::time::Instant::now();
+            for down in [true, false] {
+                let input = INPUT {
+                    r#type: INPUT_KEYBOARD,
+                    Anonymous: INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: 0,
+                            wScan: 0x12,
+                            dwFlags: KEYEVENTF_SCANCODE | if down { 0 } else { KEYEVENTF_KEYUP },
+                            time: 0,
+                            dwExtraInfo: FOCUS_PROBE_MARKER,
+                        },
+                    },
+                };
+                assert_eq!(SendInput(1, &input, std::mem::size_of::<INPUT>() as i32), 1);
+            }
+            while seen.load(Ordering::SeqCst) < 2
+                && start.elapsed() < std::time::Duration::from_millis(250)
+            {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            let delivered_while_mouse_busy = seen.load(Ordering::SeqCst) == 2;
+            let elapsed = start.elapsed();
+            let _ = release.send(());
+            native.stop_capture();
+            DestroyWindow(fixture);
+            assert!(
+                delivered_while_mouse_busy && elapsed < std::time::Duration::from_millis(250),
+                "Keyboard hook waited for busy mouse thread: {elapsed:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "Interactive test-owned focus window; quit sharing engines and run serially"]
+    fn native_keyboard_delivery_without_a_focused_text_field() {
+        let native = Windows::new();
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let captured = observed.clone();
+        native
+            .start_capture(Arc::new(move |event| {
+                captured.lock().unwrap().push(event);
+                true
+            }))
+            .unwrap();
+        unsafe {
+            let class: Vec<_> = "STATIC\0".encode_utf16().collect();
+            let title: Vec<_> = "Hopping Cursor isolated keyboard focus probe\0"
+                .encode_utf16()
+                .collect();
+            let fixture = CreateWindowExW(
+                WS_EX_TOOLWINDOW,
+                class.as_ptr(),
+                title.as_ptr(),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                100,
+                100,
+                420,
+                180,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            assert!(!fixture.is_null());
+            let edit_class: Vec<_> = "EDIT\0".encode_utf16().collect();
+            let edit = CreateWindowExW(
+                0,
+                edit_class.as_ptr(),
+                std::ptr::null(),
+                WS_CHILD | WS_VISIBLE | WS_BORDER,
+                20,
+                40,
+                300,
+                40,
+                fixture,
+                std::ptr::null_mut(),
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            assert!(!edit.is_null());
+            SetForegroundWindow(fixture);
+            assert_eq!(
+                GetForegroundWindow(),
+                fixture,
+                "Isolated focus fixture must own foreground input"
+            );
+            let mut results = Vec::new();
+            for focused in [std::ptr::null_mut(), fixture, edit, std::ptr::null_mut()] {
+                SetFocus(focused);
+                assert_eq!(GetFocus(), focused);
+                observed.lock().unwrap().clear();
+                for _ in 0..8 {
+                    for down in [true, false] {
+                        let input = INPUT {
+                            r#type: INPUT_KEYBOARD,
+                            Anonymous: INPUT_0 {
+                                ki: KEYBDINPUT {
+                                    wVk: 0,
+                                    wScan: 0x12,
+                                    dwFlags: KEYEVENTF_SCANCODE
+                                        | if down { 0 } else { KEYEVENTF_KEYUP },
+                                    time: 0,
+                                    dwExtraInfo: FOCUS_PROBE_MARKER,
+                                },
+                            },
+                        };
+                        assert_eq!(SendInput(1, &input, std::mem::size_of::<INPUT>() as i32), 1);
+                    }
+                }
+                // Hook delivery executes on the native capture thread. Pump
+                // this fixture's messages so its foreground queue stays live.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                while observed.lock().unwrap().len() < 16 && std::time::Instant::now() < deadline {
+                    let mut msg: MSG = std::mem::zeroed();
+                    while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                results.push(observed.lock().unwrap().clone());
+            }
+            // Untagged synthetic input follows the production rejection path.
+            // The test-owned STATIC window has no editable document.
+            SetFocus(fixture);
+            observed.lock().unwrap().clear();
+            let ignored = KEYBOARD_INJECTED.load(Ordering::Relaxed);
+            for down in [true, false] {
+                let input = INPUT {
+                    r#type: INPUT_KEYBOARD,
+                    Anonymous: INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: 0,
+                            wScan: 0x12,
+                            dwFlags: KEYEVENTF_SCANCODE | if down { 0 } else { KEYEVENTF_KEYUP },
+                            time: 0,
+                            dwExtraInfo: 0,
+                        },
+                    },
+                };
+                assert_eq!(SendInput(1, &input, std::mem::size_of::<INPUT>() as i32), 1);
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while KEYBOARD_INJECTED.load(Ordering::Relaxed) < ignored + 2
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            let injection_rejected = observed.lock().unwrap().is_empty()
+                && KEYBOARD_INJECTED.load(Ordering::Relaxed) >= ignored + 2;
+            DestroyWindow(fixture);
+            native.stop_capture();
+            assert!(
+                injection_rejected,
+                "Production injected-event rejection must remain intact"
+            );
+            for (index, events) in results.iter().enumerate() {
+                assert_eq!(
+                    events.len(),
+                    16,
+                    "Focus phase {index}: missing native keyboard deliveries"
+                );
+                for (i, event) in events.iter().enumerate() {
+                    assert!(
+                        matches!(event, CapturedEvent::Input(InputEvent::Key {code:8, down}) if *down == (i % 2 == 0))
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     #[ignore = "Interactive desktop probe; quit other sharing engines and run serially"]

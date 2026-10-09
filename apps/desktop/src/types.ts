@@ -92,4 +92,20 @@ export interface Snapshot {
   capture_ready: boolean;
   displays_ready: boolean;
   suppressed_events?: number | null;
+  keyboard_diagnostics?: {
+    captured: number;
+    forwarded: number;
+    received: number;
+    applied: number;
+    rejected: number;
+    native: {
+      physical_events: number;
+      injected_ignored: number;
+      unsupported_events: number;
+      longest_callback_us: number;
+      slow_callbacks: number;
+      last_event_had_focus: boolean | null;
+      last_event_had_caret: boolean | null;
+    } | null;
+  };
 }

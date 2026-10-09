@@ -105,7 +105,7 @@ const sample: Snapshot = {
   diagnostics: [
     "Interface preview loaded. No native input, network, or file sharing is running.",
   ],
-  version: "0.1.3",
+  version: "0.1.4",
   session_available: true,
 };
 let preview: Snapshot;
@@ -249,6 +249,7 @@ export async function call<T = void>(
         {
           version: preview.version,
           mode: "interface preview",
+          keyboard: preview.keyboard_diagnostics,
           messages: preview.diagnostics,
         },
         null,

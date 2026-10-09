@@ -984,6 +984,105 @@ export default function App() {
                       <dd>{data.suppressed_events}</dd>
                     </div>
                   )}
+                  {data.keyboard_diagnostics && (
+                    <>
+                      {[
+                        [
+                          "Captured keyboard events",
+                          data.keyboard_diagnostics.captured,
+                        ],
+                        [
+                          "Forwarded keyboard events",
+                          data.keyboard_diagnostics.forwarded,
+                        ],
+                        [
+                          "Received keyboard events",
+                          data.keyboard_diagnostics.received,
+                        ],
+                        [
+                          "Applied keyboard events",
+                          data.keyboard_diagnostics.applied,
+                        ],
+                        [
+                          "Rejected keyboard events",
+                          data.keyboard_diagnostics.rejected,
+                        ],
+                      ].map(([label, value]) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                      {data.keyboard_diagnostics.native && (
+                        <>
+                          <div>
+                            <dt>Windows hook physical keyboard events</dt>
+                            <dd>
+                              {data.keyboard_diagnostics.native.physical_events}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Injected keyboard events ignored</dt>
+                            <dd>
+                              {
+                                data.keyboard_diagnostics.native
+                                  .injected_ignored
+                              }
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Unsupported keyboard events</dt>
+                            <dd>
+                              {
+                                data.keyboard_diagnostics.native
+                                  .unsupported_events
+                              }
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Longest keyboard callback</dt>
+                            <dd>
+                              {(
+                                data.keyboard_diagnostics.native
+                                  .longest_callback_us / 1000
+                              ).toFixed(2)}{" "}
+                              ms
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Keyboard callbacks over 100 ms</dt>
+                            <dd>
+                              {data.keyboard_diagnostics.native.slow_callbacks}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Last captured key: source keyboard focus</dt>
+                            <dd>
+                              {data.keyboard_diagnostics.native
+                                .last_event_had_focus == null
+                                ? "Not observed"
+                                : data.keyboard_diagnostics.native
+                                      .last_event_had_focus
+                                  ? "Present"
+                                  : "Absent"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Last captured key: source caret</dt>
+                            <dd>
+                              {data.keyboard_diagnostics.native
+                                .last_event_had_caret == null
+                                ? "Not observed"
+                                : data.keyboard_diagnostics.native
+                                      .last_event_had_caret
+                                  ? "Present"
+                                  : "Absent"}
+                            </dd>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
                   <div>
                     <dt>Mouse controller</dt>
                     <dd>
@@ -1041,6 +1140,15 @@ export default function App() {
                   Network round trip is measured from live heartbeats. It does
                   not measure end-to-end cursor latency.
                 </p>
+                {data.keyboard_diagnostics && (
+                  <p className="footnote">
+                    Keyboard counts reset when the app restarts. They contain no
+                    typed text or key identities. Forwarded counts include
+                    held-key handoffs and shared keyboards. Windows caret
+                    observations are diagnostic hints; a source text field is
+                    not required.
+                  </p>
+                )}
               </section>
               <section className="panel">
                 <div className="section-heading">

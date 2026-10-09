@@ -66,3 +66,9 @@ open; no new fixes or native benchmark were run during documentation/merge work.
 The README screenshot is a real native app window with the PC connected, visually
 checked for full-height sidebar. See docs/WINDOWS_HANDOFF.md for reproduction and
 native test priorities; this checkpoint is an owner-authorized alpha merge.
+
+## 0.1.4 keyboard handoff acceptance
+
+- Automated: native tagged synthetic delivery with null/non-text/edit/null focus; independent keyboard delivery during mouse-thread pressure; atomic entry publication; 32 immediate first-key and 32 shared-keyboard handoffs; held Shift/new key order; aggregate diagnostics rendering/accessibility.
+- Physical pending: same Mac editor field with Windows desktop/non-text/Notepad/Chrome as source; immediate first letter and modifiers in both directions; no source duplicate typing; pause/reconnect/emergency cleanup. See docs/TEST_0.1.4.md.
+- Diagnostics contain counts and source focus/caret booleans, no typed text, key identities, app names or event history. Native synthetic input does not establish physical Mac behavior.

@@ -30,3 +30,4 @@ Single instance,desktop,should,yes,partial,Second launch focuses existing window
 Protected identities,security,must,yes,partial,Mac Keychain migration and Windows CI DPAPI tamper/round-trip verified; physical account-recovery validation pending
 Clipboard privacy markers,security,must,no,partial,Reference-app support unverified; Mac concealed/transient/generated and Windows history/cloud exclusions; unmarked secrets cannot be identified
 Responsive protected startup,desktop,must,no,yes,Background protected identity read; fail-closed IPC until ready; Quit works during approval wait; IPC mock regression
+Focus-independent keyboard handoff,input,must,yes,partial,0.1.4 dedicated Windows keyboard pump and atomic Enter-held barrier; native synthetic probes and encrypted handoffs pass; physical source-focus report pending

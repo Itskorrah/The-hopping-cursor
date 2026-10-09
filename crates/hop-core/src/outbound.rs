@@ -46,6 +46,10 @@ impl Outbound {
             notified.await;
         }
     }
+    #[cfg(test)]
+    pub(crate) fn try_recv(&self) -> Option<(u64, Message)> {
+        self.pending.lock().unwrap().pop_front()
+    }
 }
 
 #[cfg(test)]

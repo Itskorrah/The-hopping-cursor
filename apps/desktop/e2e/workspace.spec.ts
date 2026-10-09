@@ -15,6 +15,59 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 test.afterEach(() => expect(errors).toEqual([]));
+test("keyboard diagnostics explain capture and delivery without requiring source text focus", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.evaluate(() => {
+    const key = "hopping-cursor-interface-preview-v1";
+    const data = JSON.parse(localStorage.getItem(key)!);
+    data.keyboard_diagnostics = {
+      captured: 16,
+      forwarded: 16,
+      received: 0,
+      applied: 0,
+      rejected: 0,
+      native: {
+        physical_events: 16,
+        injected_ignored: 4,
+        unsupported_events: 0,
+        longest_callback_us: 125,
+        slow_callbacks: 0,
+        last_event_had_focus: false,
+        last_event_had_caret: false,
+      },
+    };
+    localStorage.setItem(key, JSON.stringify(data));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await expect(
+    page.getByText("Captured keyboard events", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Forwarded keyboard events", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Absent", { exact: true })).toHaveCount(2);
+  await expect(
+    page.getByText(/a source text field is not required/),
+  ).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.evaluate(() => {
+    const key = "hopping-cursor-interface-preview-v1";
+    const data = JSON.parse(localStorage.getItem(key)!);
+    data.keyboard_diagnostics.native = null;
+    localStorage.setItem(key, JSON.stringify(data));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await expect(
+    page.getByText("Received keyboard events", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Windows hook physical keyboard events", { exact: true }),
+  ).toHaveCount(0);
+});
 test("older native snapshots cannot overwrite newer readiness and quit is available", async ({
   page,
 }) => {

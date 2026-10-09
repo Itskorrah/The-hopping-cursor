@@ -1,5 +1,13 @@
 # Development evidence — 2026-10-09
 
+Latest checkpoint: [0.1.4 keyboard handoff evidence](TEST_0.1.4.md).
+Separate Windows keyboard pump and atomic remote entry fix two demonstrated
+local weaknesses. Aggregate keyboard-stage diagnostics and 32 repeated first-key
+plus shared-keyboard handoffs pass. Owner reports 0.1.3 E/emoji now appears fixed;
+the physical source-focus typing issue remains open for paired acceptance.
+
+The following 0.1.3 and earlier checkpoints are historical evidence.
+
 Latest checkpoint: [Windows-native 0.1.3 evidence](TEST_0.1.3.md), 2026-10-10.
 Capture readiness, inherited Mac Fn flags and Windows motion processing/queue
 pressure have changes and regressions. Native Windows toolchain/installer and

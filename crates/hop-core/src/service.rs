@@ -116,6 +116,11 @@ pub struct Service {
     pub(crate) session_available: AtomicBool,
     input_available: AtomicBool,
     capture_started: AtomicBool,
+    keyboard_captured: AtomicU64,
+    keyboard_forwarded: AtomicU64,
+    keyboard_received: AtomicU64,
+    keyboard_applied: AtomicU64,
+    keyboard_rejected: AtomicU64,
     displays_available: AtomicBool,
     session_clock: Mutex<SystemTime>,
     metadata_changed: watch::Sender<u64>,
@@ -242,6 +247,11 @@ impl Service {
             session_available: AtomicBool::new(session_available),
             input_available: AtomicBool::new(input_available),
             capture_started: AtomicBool::new(false),
+            keyboard_captured: AtomicU64::new(0),
+            keyboard_forwarded: AtomicU64::new(0),
+            keyboard_received: AtomicU64::new(0),
+            keyboard_applied: AtomicU64::new(0),
+            keyboard_rejected: AtomicU64::new(0),
             displays_available: AtomicBool::new(true),
             session_clock: Mutex::new(SystemTime::now()),
             listening_port,
@@ -342,6 +352,14 @@ impl Service {
             transfers: s.transfers.values().cloned().collect(),
             permissions: self.backend.permissions(),
             capture_ready: self.capture_started.load(Ordering::SeqCst),
+            keyboard_diagnostics: KeyboardDiagnostics {
+                captured: self.keyboard_captured.load(Ordering::Relaxed),
+                forwarded: self.keyboard_forwarded.load(Ordering::Relaxed),
+                received: self.keyboard_received.load(Ordering::Relaxed),
+                applied: self.keyboard_applied.load(Ordering::Relaxed),
+                rejected: self.keyboard_rejected.load(Ordering::Relaxed),
+                native: self.backend.keyboard_capture_stats(),
+            },
             displays_ready: self.displays_available.load(Ordering::SeqCst),
             active_device: s
                 .active
@@ -574,7 +592,18 @@ impl Service {
             y: park.bounds.y + park.bounds.height / 2.,
         })?;
         self.release_physical_on_source();
-        self.state.lock().unwrap().active = Some(Active {
+        let mut state = self.state.lock().unwrap();
+        // Publish the Enter barrier while ownership is locked. A keyboard
+        // callback on another native thread must never enqueue its first key
+        // ahead of the remote lease.
+        let entered = self.queue_enter_locked(&state, device_id, display_id, nx, ny, true);
+        if !entered {
+            drop(state);
+            self.send(device_id, Message::Leave);
+            self.release();
+            anyhow::bail!("Input queue unavailable; returned input locally");
+        }
+        state.active = Some(Active {
             peer: device_id.into(),
             display: display_id.into(),
             x,
@@ -582,23 +611,12 @@ impl Service {
             return_x: return_position.0,
             return_y: return_position.1,
         });
+        drop(state);
         if let Err(e) = self.sync_forwarding() {
             self.release();
             return Err(e.context("Cannot suppress local input"));
         }
         self.announce_focus(device_id);
-        if !self.send(
-            device_id,
-            Message::Enter {
-                display_id: display_id.into(),
-                x: nx,
-                y: ny,
-            },
-        ) {
-            self.release();
-            anyhow::bail!("Input queue unavailable; returned input locally");
-        }
-        self.forward_physical_to(device_id);
         Ok(())
     }
     pub fn save_profile(&self, name: &str) -> Result<()> {
@@ -888,7 +906,7 @@ impl Service {
     }
     pub fn export_diagnostics(&self) -> String {
         let snapshot = self.snapshot();
-        serde_json::to_string_pretty(&serde_json::json!({"version":snapshot.version,"platform":snapshot.local.platform,"permissions":snapshot.permissions,"port":snapshot.listening_port,"peer_count":snapshot.peers.len(),"connected_count":snapshot.peers.iter().filter(|p|p.connected).count(),"rtt_ms":snapshot.peers.iter().filter_map(|p|p.latency_ms).collect::<Vec<_>>(),"messages":snapshot.diagnostics})).unwrap()
+        serde_json::to_string_pretty(&serde_json::json!({"version":snapshot.version,"platform":snapshot.local.platform,"permissions":snapshot.permissions,"port":snapshot.listening_port,"peer_count":snapshot.peers.len(),"connected_count":snapshot.peers.iter().filter(|p|p.connected).count(),"rtt_ms":snapshot.peers.iter().filter_map(|p|p.latency_ms).collect::<Vec<_>>(),"messages":snapshot.diagnostics,"keyboard":snapshot.keyboard_diagnostics,"local_controls_pointer":snapshot.controller_device==snapshot.local.id,"cursor_is_local":snapshot.active_device==snapshot.local.id})).unwrap()
     }
     pub(crate) fn approved(&self, id: &str, key: &[u8]) -> Result<bool> {
         let c = self.config.lock().unwrap();
@@ -1289,7 +1307,11 @@ impl Service {
         });
     }
     fn send(&self, id: &str, message: Message) -> bool {
-        self.channels.lock().unwrap().get(id).is_some_and(|c| {
+        let keyboard = matches!(
+            message,
+            Message::Input(InputEvent::Key { .. }) | Message::SharedKey { .. }
+        );
+        let sent = self.channels.lock().unwrap().get(id).is_some_and(|c| {
             if matches!(
                 message,
                 Message::Leave | Message::Input(InputEvent::ReleaseAll)
@@ -1299,7 +1321,11 @@ impl Service {
             } else {
                 c.tx.try_send((c.epoch.load(Ordering::SeqCst), message))
             }
-        })
+        });
+        if sent && keyboard {
+            self.keyboard_forwarded.fetch_add(1, Ordering::Relaxed);
+        }
+        sent
     }
     fn announce_focus(&self, target: &str) {
         let c = self.routing.load();
@@ -1371,6 +1397,13 @@ impl Service {
         self.state.lock().unwrap().layout_offers.remove(peer);
     }
     fn receive_control(&self, id: &str, message: Message) -> Result<()> {
+        let keyboard = matches!(
+            message,
+            Message::Input(InputEvent::Key { .. }) | Message::SharedKey { .. }
+        );
+        if keyboard {
+            self.keyboard_received.fetch_add(1, Ordering::Relaxed);
+        }
         let allowed = {
             let c = self.routing.load();
             c.peers.get(id).is_some_and(|p| *p)
@@ -1385,6 +1418,7 @@ impl Service {
                     "Invalid shared key"
                 );
                 if !allowed {
+                    self.keyboard_rejected.fetch_add(1, Ordering::Relaxed);
                     return Ok(());
                 }
                 let c = self.routing.load();
@@ -1419,6 +1453,7 @@ impl Service {
                     }
                 } else {
                     self.backend.inject(&event)?;
+                    self.keyboard_applied.fetch_add(1, Ordering::Relaxed);
                 }
             }
             Message::LayoutOffer { layout } => {
@@ -1538,6 +1573,11 @@ impl Service {
                         );
                     }
                     self.backend.inject(&event)?;
+                    if keyboard {
+                        self.keyboard_applied.fetch_add(1, Ordering::Relaxed);
+                    }
+                } else if keyboard {
+                    self.keyboard_rejected.fetch_add(1, Ordering::Relaxed);
                 }
             }
             Message::Leave => {
@@ -1568,6 +1608,9 @@ impl Service {
         Ok(())
     }
     pub fn capture(&self, event: CapturedEvent) -> bool {
+        if matches!(event, CapturedEvent::Input(InputEvent::Key { .. })) {
+            self.keyboard_captured.fetch_add(1, Ordering::Relaxed);
+        }
         if matches!(event, CapturedEvent::Input(InputEvent::ReleaseAll)) {
             let mut state = self.state.lock().unwrap();
             state.pressed.clear();
@@ -1786,6 +1829,23 @@ impl Service {
                                     return true;
                                 }
                                 let peer = next.device_id.clone();
+                                let same_peer = old.as_ref().is_some_and(|a| a.peer == peer);
+                                if !self.queue_enter_locked(
+                                    &s,
+                                    &peer,
+                                    &next.display_id,
+                                    px,
+                                    py,
+                                    !same_peer,
+                                ) {
+                                    // Retain the old active lease for release,
+                                    // so a failed handoff cleans up both sides.
+                                    s.active = old;
+                                    drop(s);
+                                    self.send(&peer, Message::Leave);
+                                    self.release();
+                                    return false;
+                                }
                                 s.active = Some(Active {
                                     peer: peer.clone(),
                                     display: next.display_id.clone(),
@@ -1806,7 +1866,6 @@ impl Service {
                                     local_display.bounds.y + local_display.bounds.height / 2.;
                                 drop(s);
                                 let old_was_local = old.is_none();
-                                let same_peer = old.as_ref().is_some_and(|a| a.peer == peer);
                                 if let Some(a) = old {
                                     if !same_peer {
                                         self.send(&a.peer, Message::Leave);
@@ -1825,20 +1884,6 @@ impl Service {
                                     return false;
                                 }
                                 self.announce_focus(&peer);
-                                if !self.send(
-                                    &peer,
-                                    Message::Enter {
-                                        display_id: next.display_id,
-                                        x: px,
-                                        y: py,
-                                    },
-                                ) {
-                                    self.release();
-                                    return false;
-                                }
-                                if !same_peer {
-                                    self.forward_physical_to(&peer);
-                                }
                                 return true;
                             }
                         }
@@ -1929,34 +1974,62 @@ impl Service {
                 .inject(&InputEvent::Button { button, down: true });
         }
     }
-    fn forward_physical_to(&self, id: &str) {
+    // Enter and the pre-handoff held state are one publication barrier. Taking
+    // the held snapshot later could resend a newly captured first key-down.
+    fn queue_enter_locked(
+        &self,
+        state: &State,
+        id: &str,
+        display: &str,
+        x: f64,
+        y: f64,
+        held: bool,
+    ) -> bool {
+        if !self.send(
+            id,
+            Message::Enter {
+                display_id: display.into(),
+                x,
+                y,
+            },
+        ) {
+            return false;
+        }
+        if !held {
+            return true;
+        }
         let enabled = self.routing.load().settings.map_modifiers;
-        let (source, target) = {
-            let s = self.state.lock().unwrap();
-            (
-                s.local.platform.clone(),
-                s.peers
-                    .get(id)
-                    .map(|p| p.device.platform.clone())
-                    .unwrap_or_default(),
-            )
-        };
-        let (keys, buttons) = self.physical();
-        for code in keys {
-            self.send(
+        let source = &state.local.platform;
+        let target = state
+            .peers
+            .get(id)
+            .map(|p| p.device.platform.as_str())
+            .unwrap_or("");
+        for code in state
+            .pressed
+            .iter()
+            .copied()
+            .filter(|k| *k != 57 && *k != 41 && !state.consumed.contains(k))
+        {
+            if !self.send(
                 id,
                 Message::Input(InputEvent::Key {
-                    code: topology::map_key(code, &source, &target, enabled),
+                    code: topology::map_key(code, source, target, enabled),
                     down: true,
                 }),
-            );
+            ) {
+                return false;
+            }
         }
-        for button in buttons {
-            self.send(
+        for button in state.buttons.iter().copied() {
+            if !self.send(
                 id,
                 Message::Input(InputEvent::Button { button, down: true }),
-            );
+            ) {
+                return false;
+            }
         }
+        true
     }
     fn reconnect_candidates(&self) -> Vec<(String, Vec<String>)> {
         let config = self.config.lock().unwrap();
@@ -2314,6 +2387,113 @@ mod tests {
             matches!(completed, Ok(false)),
             "Native hooks must remain responsive while configuration is locked"
         );
+    }
+
+    #[tokio::test]
+    async fn remote_lease_is_queued_before_native_handoff_for_jump_and_edge() {
+        for edge in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let backend = Arc::new(Headless::default());
+            let source = start_test(dir.path().into(), Some(0), backend.clone())
+                .await
+                .unwrap();
+            let mut remote = source.snapshot().local;
+            remote.id = "test-peer".into();
+            {
+                let mut c = source.config.lock().unwrap();
+                c.settings.edge_delay_ms = 0;
+                c.peers.insert(
+                    remote.id.clone(),
+                    TrustedPeer {
+                        public_key: "synthetic".into(),
+                        name: "test".into(),
+                        address: None,
+                        allow_input: true,
+                        allow_clipboard: false,
+                        allow_files: false,
+                    },
+                );
+                source.update_routing(&c);
+            }
+            source.state.lock().unwrap().peers.insert(
+                remote.id.clone(),
+                PeerStatus {
+                    device: remote.clone(),
+                    address: "127.0.0.1:1".into(),
+                    public_key: None,
+                    safety_code: None,
+                    trusted: true,
+                    connected: true,
+                    latency_ms: None,
+                    last_error: None,
+                },
+            );
+            let local = source.snapshot().local;
+            source
+                .set_layout(vec![
+                    LayoutDisplay {
+                        device_id: local.id,
+                        display_id: local.displays[0].id.clone(),
+                        rect: Rect {
+                            x: 0.,
+                            y: 0.,
+                            width: 1920.,
+                            height: 1080.,
+                        },
+                        hidden: false,
+                    },
+                    LayoutDisplay {
+                        device_id: remote.id.clone(),
+                        display_id: remote.displays[0].id.clone(),
+                        rect: Rect {
+                            x: 1920.,
+                            y: 0.,
+                            width: 1920.,
+                            height: 1080.,
+                        },
+                        hidden: false,
+                    },
+                ])
+                .unwrap();
+            let normal = Arc::new(crate::outbound::Outbound::new(32));
+            let (priority, _urgent) = mpsc::unbounded_channel();
+            source.channels.lock().unwrap().insert(
+                remote.id.clone(),
+                Channel {
+                    generation: "test".into(),
+                    preferred: true,
+                    tx: normal.clone(),
+                    priority,
+                    epoch: Arc::new(AtomicU64::new(0)),
+                },
+            );
+            let ready = Arc::new(AtomicBool::new(false));
+            let observed = ready.clone();
+            *backend.forwarding_probe.lock().unwrap() = Some(Arc::new(move |forwarding| {
+                if forwarding {
+                    while let Some((_, message)) = normal.try_recv() {
+                        if matches!(message, Message::Enter { .. }) {
+                            observed.store(true, Ordering::SeqCst);
+                        }
+                    }
+                }
+            }));
+            if edge {
+                assert!(source.capture(CapturedEvent::Move {
+                    x: 1919.,
+                    y: 500.,
+                    dx: 5.,
+                    dy: 0.
+                }));
+            } else {
+                source
+                    .jump_to_display(&remote.id, &remote.displays[0].id)
+                    .unwrap();
+            }
+            let queued = ready.load(Ordering::SeqCst);
+            source.shutdown();
+            assert!(queued, "Enter must be queued before native forwarding exposes the new active owner (edge={edge})");
+        }
     }
 
     #[tokio::test]
