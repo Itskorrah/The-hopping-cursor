@@ -10,7 +10,7 @@ Clipboard text,clipboard,must,yes,partial,Real encrypted exchange tested with me
 Clipboard images and formatting,clipboard,should,yes,partial,PNG/HTML adapters compile; cross-app OS tests pending
 File transfers with progress,files,must,yes,yes,Encrypted streaming acceptance SHA-256 quotas and non-overwrite tested
 Native edge file drag,files,must,yes,no,App-window drag/drop works; Explorer/Finder cross-edge dragging not implemented
-Clipboard files,files,should,yes,partial,Explicit Finder URLs and Explorer CF_HDROP actions through consented transfer; Mac isolated round-trip and opt-in verified automatic batches tested; newer-copy preservation; physical cross-app checks pending
+Clipboard files,files,should,yes,partial,Explicit Finder URLs and Explorer CF_HDROP actions through consented transfer; Mac isolated round-trip and opt-in verified automatic batches tested; newer-copy preservation; OS-write failure preserves verified files with diagnostic fallback; physical cross-app checks pending
 Cursor lock,input,should,yes,partial,Edge-blocking toggle; native usage needs testing
 Game mode,input,should,yes,partial,Edge-blocking only; raw relative gaming input pending
 Hide displays,layout,should,yes,partial,Hidden displays excluded from routing; native held drags need validation
@@ -29,3 +29,4 @@ Display lifecycle,layout,must,yes,partial,Two-second hotplug refresh; Mac UUID a
 Single instance,desktop,should,yes,partial,Second launch focuses existing window; native verification pending
 Protected identities,security,must,yes,partial,Mac Keychain migration and Windows CI DPAPI tamper/round-trip verified; physical account-recovery validation pending
 Clipboard privacy markers,security,must,no,partial,Reference-app support unverified; Mac concealed/transient/generated and Windows history/cloud exclusions; unmarked secrets cannot be identified
+Responsive protected startup,desktop,must,no,yes,Background protected identity read; fail-closed IPC until ready; Quit works during approval wait; IPC mock regression

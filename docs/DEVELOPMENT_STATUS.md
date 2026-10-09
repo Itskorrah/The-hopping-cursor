@@ -195,8 +195,8 @@ mouse lease. Clipboard checks cover consent, echo, batch supersession and newer
 recipient clipboard preservation. UI adds honest controller/destination/visibility
 state and native chrome conventions.
 
-Local verification: **54 Rust tests (21 unit / 33 encrypted integration)**,
-**13 Playwright browser tests**, TypeScript/Vite, strict core/CLI Clippy on
+Local verification: **55 Rust tests (21 unit / 34 encrypted integration)**,
+**14 Playwright browser tests**, TypeScript/Vite, strict core/CLI Clippy on
 Apple Silicon, Intel Mac and Windows x64, Rustfmt and parser harness compile pass.
 Dedicated multicast discovery remains an ignored separate check; no new parser
 fuzz campaign or end-to-end latency benchmark was performed for this pass.
@@ -204,3 +204,11 @@ Windows native runtime is not exercised by cross-checks. The release checklist
 in TEST_0.1.2.md is still pending. Native edge file dragging, folders/promises,
 privileged desktops, signed production distribution and external review remain
 unfinished. This branch is for controlled test delivery and is not merged into main.
+
+Startup sampling traced the local 0.1.2 launch wait to SecItemCopyMatching in
+macOS SecurityAgent. Engine startup now runs on a dedicated background thread;
+IPC fails closed until ready, while the window/tray and Quit remain responsive.
+An IPC-mocked browser check confirms no sample computers appear during this wait.
+No Keychain approval, password bypass or new identity fallback was automated.
+Verified received files survive OS clipboard publication failure, with a visible
+diagnostic fallback; its encrypted transfer regression passes.

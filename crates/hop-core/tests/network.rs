@@ -1485,3 +1485,44 @@ async fn later_file_copy_wins_when_consent_is_answered_out_of_order() {
         "new.txt"
     );
 }
+
+#[tokio::test]
+async fn unavailable_file_clipboard_preserves_verified_files_and_reports_fallback() {
+    let p = pair(true).await;
+    for service in [&p.a, &p.b] {
+        let mut settings = service.snapshot().settings;
+        settings.clipboard_files = true;
+        service.settings(settings).unwrap();
+    }
+    p.pb.file_clipboard_blocked
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let path = p._a.path().join("clipboard-fallback.txt");
+    tokio::fs::write(&path, b"verified fallback").await.unwrap();
+    *p.pa.file_clipboard.lock().unwrap() = vec![path];
+    wait(|| {
+        p.b.snapshot()
+            .diagnostics
+            .iter()
+            .any(|message| message.contains("system file clipboard could not be updated"))
+    })
+    .await;
+    wait(|| {
+        p.a.snapshot()
+            .transfers
+            .iter()
+            .any(|transfer| transfer.state == "complete")
+    })
+    .await;
+    let received =
+        p.b.snapshot()
+            .transfers
+            .into_iter()
+            .find(|transfer| transfer.direction == "incoming")
+            .unwrap();
+    assert_eq!(received.state, "complete");
+    assert_eq!(
+        tokio::fs::read(received.saved_path.unwrap()).await.unwrap(),
+        b"verified fallback"
+    );
+    assert!(p.pb.file_clipboard.lock().unwrap().is_empty());
+}

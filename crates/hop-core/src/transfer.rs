@@ -587,57 +587,66 @@ impl Service {
         if is_file {
             self.finish(&id, &result);
         }
-        if let Some((batch, _, total)) = batch {
-            if result.is_err() {
-                self.file_batches.lock().unwrap().remove(&batch);
-            } else {
-                let path = self
-                    .state
-                    .lock()
-                    .unwrap()
-                    .transfers
-                    .get(&id)
-                    .and_then(|t| t.saved_path.as_ref())
-                    .map(PathBuf::from)
-                    .context("Verified file unavailable")?;
-                // Serialize publication with new offers; an older batch must
-                // not win over a more recent copy from another controller.
-                let mut batches = self.file_batches.lock().unwrap();
-                let completed = {
-                    let record = batches
-                        .get_mut(&batch)
-                        .context("File clipboard batch expired")?;
-                    record.paths.push(path);
-                    record.active = false;
-                    record.created = std::time::Instant::now();
-                    if record.paths.len() == total as usize {
-                        batches.remove(&batch)
-                    } else {
-                        None
-                    }
-                };
-                if let Some(record) = completed {
-                    // Preserve clipboard edits made while consent/transfer was pending.
-                    let unchanged = !record.superseded
-                        && self.backend.clipboard_revision() == record.revision
-                        && file_list_hash(&self.backend.read_file_clipboard()?) == record.original;
-                    if unchanged {
-                        let c = self.config.lock().unwrap();
-                        if !c.settings.paused
-                            && c.settings.clipboard_files
-                            && c.peers
-                                .get(&peer)
-                                .is_some_and(|p| p.allow_files && p.allow_clipboard)
-                        {
-                            let mut seen = self.file_clipboard_hash.lock().unwrap();
-                            self.backend.write_file_clipboard(&record.paths)?;
-                            *seen = file_list_hash(&record.paths);
+        let publication: Result<()> = (|| {
+            if let Some((batch, _, total)) = batch {
+                if result.is_err() {
+                    self.file_batches.lock().unwrap().remove(&batch);
+                } else {
+                    let path = self
+                        .state
+                        .lock()
+                        .unwrap()
+                        .transfers
+                        .get(&id)
+                        .and_then(|t| t.saved_path.as_ref())
+                        .map(PathBuf::from)
+                        .context("Verified file unavailable")?;
+                    // Serialize publication with new offers; an older batch must
+                    // not win over a more recent copy from another controller.
+                    let mut batches = self.file_batches.lock().unwrap();
+                    let completed = {
+                        let record = batches
+                            .get_mut(&batch)
+                            .context("File clipboard batch expired")?;
+                        record.paths.push(path);
+                        record.active = false;
+                        record.created = std::time::Instant::now();
+                        if record.paths.len() == total as usize {
+                            batches.remove(&batch)
+                        } else {
+                            None
                         }
-                    } else {
-                        self.note("Received copied files are ready in File transfers; your newer clipboard was preserved.".into());
+                    };
+                    if let Some(record) = completed {
+                        // Preserve clipboard edits made while consent/transfer was pending.
+                        let unchanged = !record.superseded
+                            && self.backend.clipboard_revision() == record.revision
+                            && file_list_hash(&self.backend.read_file_clipboard()?)
+                                == record.original;
+                        if unchanged {
+                            let c = self.config.lock().unwrap();
+                            if !c.settings.paused
+                                && c.settings.clipboard_files
+                                && c.peers
+                                    .get(&peer)
+                                    .is_some_and(|p| p.allow_files && p.allow_clipboard)
+                            {
+                                let mut seen = self.file_clipboard_hash.lock().unwrap();
+                                self.backend.write_file_clipboard(&record.paths)?;
+                                *seen = file_list_hash(&record.paths);
+                            }
+                        } else {
+                            self.note("Received copied files are ready in File transfers; your newer clipboard was preserved.".into());
+                        }
                     }
                 }
             }
+            Ok(())
+        })();
+        if publication.is_err() {
+            // A verified file remains useful even when the OS clipboard is busy
+            // or unavailable. Surface the fallback instead of silently failing.
+            self.note("Files were received and verified, but the system file clipboard could not be updated. Open File transfers and copy the received files there.".into());
         }
         result
     }

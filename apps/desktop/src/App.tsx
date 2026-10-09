@@ -246,7 +246,8 @@ export default function App() {
         <Mark />
         <h1>The Hopping Cursor</h1>
         <p>{failure || "Starting your local workspace…"}</p>
-        {failure && <button onClick={() => void refresh()}>Retry</button>}
+        {failure && <button onClick={() => void refresh()}>Check again</button>}
+        {native && <button onClick={() => void call("quit_app")}>Quit application</button>}
       </div>
     );
   const connected = data.peers.filter((p) => p.connected),

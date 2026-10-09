@@ -114,7 +114,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-The current suite has **54 Rust tests on macOS and 13 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
+The current suite has **55 Rust tests on macOS and 14 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
 
 Dependency audit results and remaining warnings are recorded in [docs/SECURITY.md](docs/SECURITY.md). The prioritized path from this alpha to a release is in [docs/ROADMAP.md](docs/ROADMAP.md); the research feature matrix is in [replica/features.csv](replica/features.csv).
 
@@ -219,7 +219,7 @@ Newer clipboard edits are preserved; superseded batches do not replace newer
 copies. This can require a wait before pasting large files. Folders, file promises,
 cut/move semantics and cross-screen native dragging are still unsupported.
 
-54 Rust tests, 13 browser tests, strict Clippy for Windows and both Mac targets,
+55 Rust tests, 14 browser tests, strict Clippy for Windows and both Mac targets,
 Rustfmt, frontend build and parser harness compile checks pass locally.
 User-reported 0.1.1 Mac→Windows trackpad/typing/Enter/text copy-paste worked;
 Windows→Mac and the stationary Windows cursor did not. The 0.1.2 changes need a
@@ -227,3 +227,9 @@ fresh physical retest, including permission continuity and high-DPI motion.
 See [the update checklist](docs/TEST_0.1.2.md) and
 [native drag research](docs/NATIVE_DRAG_DESIGN.md). No new latency benchmark or
 Windows secure-desktop support is claimed.
+
+Protected identity access now runs off the desktop UI thread. While a system
+approval is pending, the window shows startup guidance and Quit remains available.
+Identity access failures keep sharing unavailable and preserve the existing key.
+If the OS file clipboard is busy after receiving a verified batch, Diagnostics
+explains that the saved files remain available through File transfers.

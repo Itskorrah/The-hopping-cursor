@@ -211,3 +211,14 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
   out of order. Publish only a complete verified latest batch, and preserve
   newer recipient revisions. Hash verified local paths to prevent echo.
 - Status: encrypted integration tests pass; physical Finder/Explorer checks pending.
+
+### BUG-017: Keychain approval makes desktop startup appear frozen
+
+- Severity: S2.
+- Evidence: native process sample waits in SecItemCopyMatching while Tauri setup
+  synchronously blocks its main thread. SecurityAgent is running.
+- Change: background startup with readiness/error guards for every engine command.
+  Window and Quit are available before protected storage completes; no identity
+  regeneration or security bypass.
+- Status: strict native desktop Clippy and IPC-mocked startup regression; refreshed
+  native launch verification is required after the owner's OS approval.

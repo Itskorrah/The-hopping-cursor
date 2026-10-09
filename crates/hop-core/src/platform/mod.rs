@@ -76,6 +76,7 @@ pub struct Headless {
     pub events: std::sync::Mutex<Vec<InputEvent>>,
     pub clipboard: std::sync::Mutex<Vec<ClipboardPart>>,
     pub file_clipboard: std::sync::Mutex<Vec<std::path::PathBuf>>,
+    pub file_clipboard_blocked: std::sync::atomic::AtomicBool,
     pub display_override: std::sync::Mutex<Option<Vec<Display>>>,
 }
 impl Platform for Headless {
@@ -127,6 +128,12 @@ impl Platform for Headless {
         Ok(self.file_clipboard.lock().unwrap().clone())
     }
     fn write_file_clipboard(&self, paths: &[std::path::PathBuf]) -> Result<()> {
+        anyhow::ensure!(
+            !self
+                .file_clipboard_blocked
+                .load(std::sync::atomic::Ordering::SeqCst),
+            "File clipboard unavailable"
+        );
         *self.file_clipboard.lock().unwrap() = paths.to_vec();
         Ok(())
     }

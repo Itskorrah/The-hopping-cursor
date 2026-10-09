@@ -101,6 +101,12 @@ queue invalidation. Accepted arrangement sharing protects saved local work.
 Opt-in native copied-file batches use consented verified streams, prevent bounce
 and preserve newer clipboard edits. Diagnostics identify controller/destination;
 UI gains arrangement review/file clipboard and native chrome conventions.
-54 Rust / 13 browser checks pass; native runtime retest is pending. Native
+55 Rust / 14 browser checks pass; native runtime retest is pending. Native
 Finder/Explorer edge drag, folders/file promises, measured latency, signing and
 production updates remain unfinished. See docs/TEST_0.1.2.md.
+
+0.1.2 delivery follow-up: startup sampling located the Keychain wait on the UI
+thread; protected startup moved to a background thread with fail-closed IPC and
+a Quit control. OS file clipboard failure now preserves received files and
+reports a usable transfer-page fallback. New transfer and startup-IPC regressions
+bring verification to 55 Rust and 14 browser tests.
