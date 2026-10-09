@@ -154,6 +154,11 @@ mod tests {
     fn rejects_malformed_and_trailing_plaintext() {
         assert!(decode_plain(&[]).is_err());
         assert!(decode_plain(&[255; 20]).is_err());
+        // Synthetic CI fuzz input: a truncated display list must fail cleanly.
+        assert!(decode_plain(include_bytes!(
+            "../tests/fixtures/malformed-display-count.bin"
+        ))
+        .is_err());
         let mut bytes = postcard::to_allocvec(&Message::Leave).unwrap();
         assert!(matches!(decode_plain(&bytes).unwrap(), Message::Leave));
         bytes.push(0);

@@ -64,6 +64,10 @@ fn main() -> std::io::Result<()> {
         },
     ];
     std::fs::create_dir_all("fuzz/corpus/control_frames")?;
+    std::fs::write(
+        "fuzz/corpus/control_frames/malformed-display-count",
+        include_bytes!("../../crates/hop-core/tests/fixtures/malformed-display-count.bin"),
+    )?;
     for (index, message) in messages.iter().enumerate() {
         std::fs::write(
             format!("fuzz/corpus/control_frames/seed-{index}"),

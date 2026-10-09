@@ -51,3 +51,9 @@ Finder/Explorer workflows, native permissions and soak/performance remain gaps.
 All five jobs in CI run 37880413374 passed on b0344df, including Windows DPAPI
 and disposable clipboard checks. Refreshed bundled notices after native dependency
 additions; CI now regenerates the inventory and rejects stale notices.
+
+A subsequent Linux fuzz campaign hit the original 512 MiB process RSS cap.
+Replayed its saved synthetic input successfully, preserved it as a decoder test
+and corpus seed, and retained an explicit 512 MiB single-input replay in CI.
+Campaigns use libFuzzer's bounded 2048 MiB default budget without reducing
+AddressSanitizer coverage or quarantine. Details are in fuzz/README.md.

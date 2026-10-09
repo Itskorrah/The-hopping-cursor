@@ -42,6 +42,10 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
 - Ensure shutdown marks peers disconnected, rejects new manual connections,
   and aborts reader tasks even when stop precedes task scheduling.
 - Add a bounded parser fuzz harness with synthetic seeds and AddressSanitizer.
+  A later Linux campaign reached its initial 512 MiB whole-process RSS cap;
+  the saved synthetic input replays successfully and is retained as a decoder
+  regression. Campaigns now use a bounded 2048 MiB budget with sanitizer
+  protections unchanged; see [fuzz evidence](../fuzz/README.md).
 - Fix current stable Rust's macOS clipboard lint; check native Clippy in CI.
 
 ## Verified locally
