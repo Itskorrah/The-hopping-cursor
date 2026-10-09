@@ -1,0 +1,23 @@
+[package]
+name = "hop-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hop-core = { path = "../crates/hop-core", features = ["fuzzing"] }
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+
+[[bin]]
+name = "control_frames"
+path = "fuzz_targets/control_frames.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

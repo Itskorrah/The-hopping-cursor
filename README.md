@@ -2,24 +2,24 @@
 
 A desktop application for sharing a mouse, keyboard, clipboard, and files between your own computers on a local network. A Rust engine, native Windows and macOS input adapters, and a Tauri/React control interface. Independently implemented from public product research; no proprietary code or assets used.
 
-**Status: development alpha.** The encrypted engine and desktop controls are implemented. Windows x64 and Intel/Apple Silicon Mac installers have built successfully on native GitHub runners. Automated tests use an in-memory OS adapter; actual Windows/macOS input and permission behavior still require the hardware checklist below. This is not yet a production replacement for a mature software KVM.
+**Status: development alpha.** The encrypted engine and desktop controls are implemented. Windows x64 and Intel/Apple Silicon Mac installers have built successfully on native GitHub runners. Most engine tests use an in-memory OS adapter; isolated Mac pasteboard tests exercise native APIs; actual Windows/macOS input and permission behavior still require the hardware checklist below. This is not yet a production replacement for a mature software KVM.
 
 ![Workspace interface preview with sample computers](docs/images/workspace.png)
 
 ## What's built
 
 - Noise XX encryption, persistent identities, matching safety codes, explicit approval on both computers, pinned keys, and revocation. No cloud account.
-- mDNS discovery, manual private-IP connection, remembered addresses, reconnection, heartbeat RTT, and input recovery on disconnect.
+- mDNS discovery as an untrusted hint, manual private-IP connection, remembered authenticated addresses, trusted-only reconnection, deterministic simultaneous-connection recovery, heartbeat RTT, and input recovery on disconnect.
 - Edge-based cursor routing with offset/stacked displays, coordinate scaling, hidden displays, configurable edge delay, sensitivity, and per-monitor hop shortcuts.
 - Windows hooks/SendInput and macOS CGEventTap/CGEventPost adapters; keyboard forwarding, common physical-key mapping, mouse buttons/scroll, injected-event filtering, held-key handoff, and Ctrl+Alt+Escape emergency recovery.
-- Plain text, HTML, and PNG clipboard exchange on separate encrypted bulk connections, type controls, per-peer permissions, and bounce suppression.
-- Streamed file transfers, app-window drag/drop, recipient approval, progress, cancellation, SHA-256 verification, duplicate-name protection, and quotas.
-- Desktop pairing, draggable/keyboard-accessible layout editor, saved layout profiles, computer management, transfers, preferences, diagnostics, and tray controls. Cursor lock and basic edge-blocking game mode.
-- Windows NSIS and Intel/Apple Silicon macOS DMG installers and build workflow in GitHub Actions. Installers are unsigned development builds; build success is not evidence of physical two-computer validation.
+- Plain text, HTML, and PNG clipboard exchange on separate encrypted bulk connections, type controls, per-peer permissions, bounce suppression, and source clipboard privacy-marker checks.
+- Streamed file transfers, app-window drag/drop, recipient approval, progress, cancellation, SHA-256 verification, duplicate-name protection, quotas, and bounded concurrency. Explicit “Send copied files” and “Copy file for pasting” actions bridge native file lists without trusting remote paths.
+- Desktop pairing, draggable/keyboard-accessible layout editor, saved layout profiles, hotplug refresh, stable macOS UUID / Windows monitor interface identifiers, single-instance window reopening, computer management, transfers, preferences, diagnostics, and tray controls. Cursor lock and basic edge-blocking game mode.
+- Windows NSIS and Intel/Apple Silicon macOS DMG installers and build workflow in GitHub Actions. Windows packages are unsigned; Mac bundles use ad hoc signatures without Developer ID or notarization. Build success is not evidence of physical two-computer validation.
 
 ## What's still missing
 
-Native Finder/Explorer file dragging across screen edges and file-pasteboard bridging; hardware display dimming; synchronized lock/wake/session state; raw relative gaming input; secure desktop/UAC/login input on Windows; media/vendor keys; hotplug refresh and stronger stable monitor IDs; Keychain/DPAPI storage; code signing/notarization; measured latency/throughput and external security review. There is no commercial license/billing system in this alpha.
+Native Finder/Explorer file dragging across screen edges, automatic file-clipboard synchronization and folder/file-promise support; hardware display dimming; synchronized lock/wake/session state; raw relative gaming input; secure desktop/UAC/login input on Windows; media/vendor keys; code signing/notarization; measured latency/throughput and external security review. There is no commercial license/billing system in this alpha.
 
 The research is in [replica/recon.md](replica/recon.md). Native limitations and acceptance steps are in [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md). Security design and trust boundaries are in [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -34,23 +34,40 @@ npm ci
 npm run desktop
 ```
 
-On macOS, grant **Accessibility**, **Input Monitoring**, and **Local Network** access in System Settings, then restart. Start on a private test LAN with non-sensitive text and files. Use a local mouse on each computer during testing.
+On macOS, use **Grant permissions / Retry** to request **Accessibility** and **Input Monitoring**, and allow **Local Network** access when prompted. Approve these in System Settings, then retry or restart if macOS requests it. Start on a private test LAN with non-sensitive text and files. Use a local mouse on each computer during testing.
+
+Mac bundles use an ad hoc signature for bundle integrity. They have no verified
+publisher or notarization. After rebuilding, macOS may require you to remove and
+re-add this app's privacy permission entry. Fully quit with **⌘Q** before reopening;
+closing the window keeps the engine running. Stable Apple Development / Developer
+ID signing is still needed for dependable permission continuity and distribution.
 
 1. Open Computers on both machines. Discovery uses mDNS; if needed, use Add computer with a local address such as `192.168.1.20:24810`.
 2. Pair the computer, compare the **entire safety code** on both screens, and approve it on **both**. One-sided approval does not permit sharing.
 3. Arrange your displays with touching edges and save. Each computer currently keeps its own layout; configure both if you want to drive from either side.
 4. Move toward a shared edge. Your keyboard follows the cursor. Use **Ctrl+Alt+Escape** on the source computer to bring input back immediately.
-5. Send files from File transfers or drop them into the app window. The receiver accepts the offer. Completed files go to the receiving folder in Preferences.
+5. Send files from File transfers or drop them into the app window. The receiver accepts the offer. Completed files go to the receiving folder in Preferences. To send files copied in Finder/Explorer, use **Send copied files**. A verified received file offers **Copy file for pasting** into another folder.
 
 Select a monitor to assign **Ctrl+Alt+1–9** hop shortcuts or use **Jump here**. Save named layout profiles for different desks. Pair permissions separately control input, clipboard, and files. **Pause** returns input locally, stops sharing, and cancels pending/active file transfers.
 
-Closing the window keeps the engine in the tray. **Quit** from the tray stops sharing and releases input. Restart after connecting/disconnecting displays in this first version. Default networking is TCP **24810**, mDNS UDP **5353**. No port forwarding is needed. Guest Wi-Fi/client isolation may block peers.
+Identity keys migrate into macOS Keychain or user-bound Windows DPAPI storage without changing pairings. A locked/missing protected identity fails startup rather than silently generating a new one. Linux/headless test configurations retain permission-restricted file storage.
+
+Closing the window keeps the engine in the tray. **Quit** from the tray stops sharing and releases input. Display changes are checked every two seconds; input returns locally and peers reconnect with fresh display metadata. Saved profiles are reconciled against attached displays. Driver/port changes and identical monitors still need hardware validation. Default networking is TCP **24810**, mDNS UDP **5353**. No port forwarding is needed. Guest Wi-Fi/client isolation may block peers.
 
 Build installers locally:
 
 ```sh
 npm run desktop:build
 ```
+
+For a local Mac debug bundle, run `npm run tauri -w apps/desktop -- build --debug --bundles app`.
+Keep signing enabled. Verify the bundle before requesting permissions:
+
+```sh
+codesign --verify --deep --strict --verbose=2 "target/debug/bundle/macos/The Hopping Cursor.app"
+```
+
+The ad hoc default follows [Tauri's signing guidance](https://v2.tauri.app/distribute/sign/macos/#ad-hoc-signing).
 
 Or open [GitHub Actions](https://github.com/Itskorrah/The-hopping-cursor/actions), select a successful **Build and verify** run, and download the Windows x64, macOS ARM64, or macOS Intel artifact. The workflow builds on native runners. Successful build artifacts are development packages, not signed public releases.
 
@@ -94,7 +111,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-The current suite has **28 Rust tests and 10 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. Neither substitutes for testing real native hooks, OS pasteboards, or multiple physical computers.
+The current suite has **42 Rust tests on macOS and 10 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
 
 Dependency audit results and remaining warnings are recorded in [docs/SECURITY.md](docs/SECURITY.md). The prioritized path from this alpha to a release is in [docs/ROADMAP.md](docs/ROADMAP.md); the research feature matrix is in [replica/features.csv](replica/features.csv).
 
@@ -114,3 +131,29 @@ docs/                       Security model and physical-platform test checklist
 The Replica pack was installed from [your repository](https://github.com/Itskorrah/replica-skill-universal). Additional skill discovery used [Vercel find-skills](https://skills.sh/vercel-labs/skills/find-skills); details are in [replica/skills.md](replica/skills.md).
 
 Original application code is MIT licensed. Installed skills preserve their own licenses; dependencies and fonts retain their respective licenses. [Bundled notices](apps/desktop/public/THIRD_PARTY_NOTICES.txt) accompany installer artifacts and the app assets. Regenerate with `python3 scripts/generate-notices.py` after changing dependencies. The name is provisional; trademark/domain checks have not been performed.
+
+## Local verification (2026-10-09)
+
+42 Rust tests and 10 Playwright browser tests pass on Apple Silicon macOS.
+Strict Clippy passes locally, and the Windows/Intel adapters are cross-checked.
+The native debug app launches; Keychain migration preserved the existing public
+identity and removed the private key from JSON. This does not validate native
+input across physical computers. Native CI checks and packages all three targets.
+After correcting Mac bundle signing and refreshing privacy entries, native
+diagnostics show capture, injection and clipboard access Available. Pause/Resume
+and Bring input here pass local IPC checks with zero paired peers. Mac packages
+are now checked inside their finished disk images before CI uploads them.
+
+The loopback tests disable multicast so independent tests cannot discover one
+another. Run the dedicated real-mDNS check separately on an isolated private LAN:
+
+```sh
+cargo test --locked --test discovery -- --ignored
+```
+
+Recovery also suspends input for unavailable displays/permissions and protected input sessions, and clears stale ownership/keys after timing gaps. This is safety recovery, not synchronized lock/wake control.
+
+A bounded AddressSanitizer parser fuzz run completed 5,299,006 cases in 181 seconds without a crash; see [fuzz/README.md](fuzz/README.md) for scope and commands.
+
+The CLI supports `daemon --no-discovery` for manual/remembered connections.
+See [docs/DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md) for detailed evidence.

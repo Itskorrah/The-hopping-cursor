@@ -5,7 +5,12 @@ offset/hidden topology, invalid layouts, safe filenames, actual two-service
 encrypted pairing and trust, acceptance/refusal, duplicate files and byte
 integrity, clipboard exchange, held-key handoff, emergency release, disconnect,
 revocation, quotas, and diagnostics exclusion. The suite currently contains
-28 Rust tests: 14 unit/security tests and 14 encrypted-network integration tests.
+42 Rust tests on macOS: 19 unit/security/native tests and 23 encrypted-network integration tests.
+Loopback services disable multicast; a separate opt-in two-service mDNS test
+checks untrusted discovery and rename refresh. Linux omits the two native pasteboard and two native-store migration tests
+(38 tests total). Windows also includes a DPAPI
+round-trip/tamper/non-overwrite test and an explicitly opted-in disposable-runner
+CF_HDROP test; it never replaces a developer clipboard during default tests.
 Additional regressions reject ciphertext tampering/replay, malformed/trailing
 messages, preserve fragmented reads during outbound traffic, bypass saturated
 queues for recovery, keep native callbacks responsive while configuration is
@@ -19,7 +24,31 @@ Console errors and 5xx responses fail tests. Profiles and permission controls
 also receive direct regression coverage, along with monitor shortcut controls.
 All 10 browser tests passed locally, including axe checks across all five pages.
 
-Not run on real hardware: native hooks, UIPI, macOS permissions/taps, clipboard
+Not run across physical peers: native input, UIPI, clipboard
 HTML/PNG interoperability, mixed DPI, OS window drag/drop, tray behavior,
 sleep/wake/hotplug, long soak tests, end-to-end latency/throughput. See
 `docs/PLATFORM_TESTING.md` for actionable steps and pass criteria.
+
+The corrected local Mac bundle passes strict recursive signature validation.
+Native diagnostics confirm capture/injection/clipboard permission availability;
+Pause/Resume and Bring input here pass IPC smoke checks with zero paired peers.
+These do not establish physical cursor/key delivery or emergency-chord behavior.
+The package guard rejects the earlier invalid Mac DMG and detaches on failure.
+
+2026-10-09 regressions cover verified-address preservation, trusted-only
+reconnect candidates, simultaneous control connections followed by verified file
+transfer, inbound address persistence, hotplug release/peer metadata refresh,
+profile reconciliation, and identity-migration success/failure. The native Mac
+app launched and its real Keychain migration preserved the public identity.
+
+Additional regressions cover copied-file consent, verified local publication,
+bulk pressure with live control heartbeats, duplicate-ID consent isolation,
+shutdown cleanup, protected-session suspension,
+wake/timing-gap ownership cleanup, and all-displays-lost recovery. Two native Mac
+checks use isolated pasteboards for privacy flags and Unicode file identities.
+The longer bounded AddressSanitizer parser run executed 5,299,006 cases in 181
+seconds without a crash/assertion (549 MiB peak RSS); see fuzz/README.md for
+reproduction and the earlier Linux resource-cap failure. Mac CI also repeats
+both isolated pasteboard checks twenty times per job after BUG-007.
+This does not establish native injection, cross-app file paste, OS lock/wake
+synchronization, or exhaustive protocol security.

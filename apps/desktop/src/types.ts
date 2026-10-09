@@ -84,4 +84,5 @@ export interface Snapshot {
   listening_port: number;
   diagnostics: string[];
   version: string;
+  session_available: boolean;
 }

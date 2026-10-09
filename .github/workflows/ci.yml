@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   core-and-ui:
     runs-on: ubuntu-latest
@@ -20,6 +23,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: python3 scripts/generate-notices.py
+      - run: git diff --exit-code -- apps/desktop/public/THIRD_PARTY_NOTICES.txt
       - run: cargo fmt --all -- --check
       - run: cargo clippy -p hop-core -p hopping-cursor --all-targets -- -D warnings
       - run: cargo test
@@ -31,6 +36,26 @@ jobs:
         with:
           name: browser-test-failures
           path: apps/desktop/test-results
+  protocol-fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - run: cargo run --locked --manifest-path fuzz/Cargo.toml --example seed
+      - name: Replay malformed display regression under AddressSanitizer
+        run: cargo +nightly fuzz run control_frames crates/hop-core/tests/fixtures/malformed-display-count.bin -- -rss_limit_mb=512 -print_final_stats=1
+      - run: cargo +nightly fuzz run control_frames -- -max_total_time=60 -rss_limit_mb=2048 -max_len=65519 -print_final_stats=1
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: parser-fuzz-failures
+          path: fuzz/artifacts
+          if-no-files-found: ignore
   native:
     strategy:
       fail-fast: false
@@ -40,11 +65,11 @@ jobs:
             target: x86_64-pc-windows-msvc
             bundles: nsis
             label: windows-x64
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             bundles: dmg
             label: macos-arm64
-          - os: macos-14
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             bundles: dmg
             label: macos-intel
@@ -54,14 +79,36 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: cargo test -p hop-core
+      - run: cargo clippy --locked -p hop-core -p hopping-cursor --all-targets --target ${{ matrix.target }} -- -D warnings
+      - run: cargo test --locked -p hop-core
+      - name: Repeat isolated native Mac pasteboard checks
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for hop_attempt in {1..20}; do
+            cargo test --locked -p hop-core --lib mac_ || exit 1
+          done
+      - name: Exercise file clipboard on disposable Windows runner
+        if: runner.os == 'Windows'
+        run: cargo test --locked -p hop-core windows_file_clipboard_round_trip -- --ignored
       - run: npm run tauri -w apps/desktop -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      - name: Verify packaged macOS application signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          shopt -s nullglob
+          hop_disk_images=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          test "${#hop_disk_images[@]}" -gt 0
+          for hop_disk_image in "${hop_disk_images[@]}"; do
+            python3 scripts/verify-macos-package.py "$hop_disk_image"
+          done
       - name: Verify installer exists
         shell: bash
         run: |

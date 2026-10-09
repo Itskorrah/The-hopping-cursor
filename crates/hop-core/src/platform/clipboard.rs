@@ -1,6 +1,10 @@
 use crate::model::ClipboardPart;
 use anyhow::Result;
 pub fn read() -> Result<Vec<ClipboardPart>> {
+    let before = super::clipboard_privacy::stamp()?;
+    if before.1 {
+        return Ok(vec![]);
+    }
     let mut c = arboard::Clipboard::new()?;
     let mut parts = vec![];
     if let Ok(text) = c.get_text() {
@@ -40,6 +44,11 @@ pub fn read() -> Result<Vec<ClipboardPart>> {
             });
         }
     }
+    // Multiple native formats are read separately. Discard a changing clipboard
+    // rather than forwarding a mixture or missing a new confidentiality marker.
+    if super::clipboard_privacy::stamp()? != before {
+        return Ok(vec![]);
+    }
     Ok(parts)
 }
 pub fn write(parts: &[ClipboardPart]) -> Result<()> {
@@ -59,12 +68,16 @@ pub fn write(parts: &[ClipboardPart]) -> Result<()> {
         let rgba = match frame.color_type {
             png::ColorType::Rgba => bytes.to_vec(),
             png::ColorType::Rgb => bytes
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .flat_map(|p| [p[0], p[1], p[2], 255])
                 .collect(),
             png::ColorType::Grayscale => bytes.iter().flat_map(|v| [*v, *v, *v, 255]).collect(),
             png::ColorType::GrayscaleAlpha => bytes
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .flat_map(|v| [v[0], v[0], v[0], v[1]])
                 .collect(),
             _ => anyhow::bail!("Unsupported PNG format"),

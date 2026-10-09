@@ -9,22 +9,28 @@ that unfinished features currently work.
    Windows scaling, offset displays, held drags/modifiers, keyboard layouts,
    permission denial, disconnects, sleep, and multi-hour use. Fix failures before
    broadening the feature surface. Measure end-to-end latency and throughput.
-2. **Finish display/session reliability.** Refresh displays on hotplug, use
-   stable hardware monitor identifiers, reconcile saved profiles, refresh
-   discovery metadata on rename, and add a single-instance/open-existing-window
-   flow. Support controlled identity storage through Keychain/DPAPI.
-3. **Implement native file interoperability.** Bridge Explorer's OLE data
-   objects/file lists and Finder's pasteboard/file promises to streamed transfers.
+2. **Validate and finish display/session reliability.** Hotplug polling, monitor UUID/interface IDs, profile reconciliation, rename
+   advertisement refresh, single-instance reopening, and Keychain/DPAPI migration
+   are implemented. Validate on physical docks, identical monitors, virtual
+   displays, permission changes, locked Keychains, and Windows account recovery.
+   Cross-port identity persistence remains driver/hardware dependent.
+3. **Finish native file interoperability.** Explicit Explorer CF_HDROP / Finder
+   file-URL clipboard actions now use consented streamed transfers. Validate these
+   across applications, then add automatic file-clipboard synchronization,
+   Explorer OLE drag objects and Finder file promises with real OS drag lifecycles.
    Preserve recipient trust, explicit policy, duplicate protection, cancellation,
    and temporary cleanup. Test OS drag lifecycle and destination applications;
    app-window drops alone do not satisfy native edge dragging or file clipboard.
 4. **Add OS power and session adapters.** Lock/wake notifications, deliberate
    synchronization controls, and supported brightness APIs with restoration on
-   stop/disconnect. Detect secure desktop/session transitions and recover safely.
+   stop/disconnect. Protected input/desktop checks, permission loss, disabled Mac taps and timing-gap
+   recovery now release ownership conservatively. Full OS lock/wake notifications
+   and synchronized actions remain unfinished.
 5. **Broaden keyboard and game support.** Configurable physical modifier mapping,
    media/vendor keys, international layout coverage, and true relative/raw mouse
    input. Define cursor-lock escape behavior and test actual fullscreen games.
-6. **Harden and package.** Protocol fuzzing, adversarial peer/resource testing,
+6. **Harden and package.** Expand the bounded parser fuzz campaign and bulk-pressure
+   regressions into sustained protocol/adversarial resource testing,
    external security review, signed Windows installers, notarized Mac packages,
    and verified signed updates. Secure desktop/UAC control requires separate
    privileged Windows-service design and review.

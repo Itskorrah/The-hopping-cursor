@@ -14,3 +14,11 @@ returned no results in this environment. Installed the official Anthropic
 frontend-design --agent codex --yes`; read before applying it.
 
 No skill substitutes for native OS documentation or real hardware validation.
+
+2026-10-09: Used find-skills again, checked the public leaderboard, and ran
+`npx skills find 'rust tauri'`. Reviewed the source and directory audit metadata
+for `nodnarbnitram/claude-code-extensions@tauri-v2` (7.6K directory installs,
+16 GitHub stars at review), then installed it locally with the skills CLI.
+Applied its IPC/state/capability guidance and checked native API choices against
+Tauri, Apple SDK headers, and Microsoft documentation. Used the Vercel React
+best-practices checklist for UI edits. Skills do not establish OS correctness.

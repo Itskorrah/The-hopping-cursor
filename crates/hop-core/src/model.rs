@@ -30,7 +30,7 @@ impl Rect {
         )
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Display {
     pub id: String,
     pub name: String,
@@ -171,6 +171,7 @@ pub struct Snapshot {
     pub listening_port: u16,
     pub diagnostics: Vec<String>,
     pub version: String,
+    pub session_available: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerPermissions {

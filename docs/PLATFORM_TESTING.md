@@ -8,13 +8,19 @@ An installer build is not evidence that input behavior has passed this checklist
    Grant macOS Accessibility and Input Monitoring; allow Local Network access.
    Restart after permission changes. Allow TCP 24810 and mDNS UDP 5353 on the
    private firewall profile. Do not run two app/CLI engines on the same port.
+   Verify the Mac app bundle with `codesign --verify --deep --strict --verbose=2`.
+   Ad hoc builds may need their permission entry refreshed after rebuilding;
+   confirm capture/injection in Diagnostics rather than relying on switches alone.
+   Fully quit with ⌘Q before reopening. Check locked Keychain recovery without
+   deleting identities or weakening their access controls.
 2. Confirm discovery. Test local IP connection when multicast is blocked.
    Compare complete safety codes on both screens, approve both, confirm connected.
    An unapproved device must never move the cursor, paste, or save a file.
 3. Arrange side-by-side, vertically, and with offsets. Cross only shared edges.
    Test every local display, multiple remote displays, Retina and Windows scaling.
-   Hidden displays must not become hopping destinations. Restart after hotplug
-   in this first version; stable hardware identification/hotplug refresh is pending.
+   Hidden displays must not become hopping destinations. Hotplug refresh polls every
+   two seconds and releases input; test undocking/all-displays-missing and restored
+   monitor IDs without restarting. Verify saved layouts survive temporary loss.
    Save/load named profiles and test Ctrl+Alt+1–9 monitor bindings, including
    offline/hidden destinations and key-up cleanup after a hop chord.
 4. Verify typing, arrows, function keys, left/right modifiers, international
@@ -24,17 +30,27 @@ An installer build is not evidence that input behavior has passed this checklist
 5. Pull Ethernet/disable Wi-Fi while controlling the other computer. Both sides
    must release synthetic held keys; source input must return within the watchdog
    window. Repeat during a held click and held modifier. Test emergency chord,
-   source sleep, target sleep, app Quit, and receiver local-input takeover.
+   source sleep, target sleep, app Quit, and receiver local-input takeover. Test Mac
+   Secure Keyboard Entry and Windows lock/UAC transitions; sharing must suspend,
+   held input must release, and paired connections should recover after return.
+   This does not grant control of Windows secure desktop or synchronize locks.
 6. Copy plain text, Unicode, HTML from a rich editor, and images in both
    directions. Disable each sharing type and check it stops. Clipboard data above
    8 MiB serialized size must be skipped. Confirm no repeated bounce/pasteboard
-   changes while idle. Do not use real credentials for these tests.
+   changes while idle. Use synthetic content marked concealed/transient/generated
+   on Mac or excluded from Windows history/cloud sharing: it must not forward.
+   Do not use real credentials for these tests; unmarked passwords are ordinary text.
 7. Send/drop files into this app. Accept and decline, test empty files, large
    files, duplicates, slow network, quota refusal, disk full, cancellation, and
    disconnect. Confirm exact bytes, unique names, and partial cleanup. Test a
    filesystem without hard links to ensure a clear error rather than data loss.
    Pause and revoke file permission while awaiting acceptance and during a large
    transfer: outstanding offers must expire and incomplete files must disappear.
+   Copy regular files in Finder/Explorer, select a paired recipient in Transfers,
+   and click **Send copied files**. On receipt, use **Copy file for pasting** and
+   paste into another folder. Test Unicode, spaces, duplicate copies, moved
+   received files, clipboard contention, per-peer file/clipboard denial, and
+   consent cancellation. Folders and virtual files must fail clearly.
 8. Unpair while controlling/transferring; permission must be revoked. Restart
    both computers and verify identities, preferences, and layouts persist.
 9. Verify tray Open, Pause/Resume, Bring input here, and Quit. Closing the main
@@ -44,5 +60,6 @@ An installer build is not evidence that input behavior has passed this checklist
     and packet-loss conditions. Heartbeat RTT is a different measurement.
 
 Still out of scope: UAC/Windows login/secure desktop input, native Finder/Explorer
-file dragging across monitor edges, file pasteboard bridging, dimming, session
-lock/wake synchronization, relative/raw gaming input, and system-wide media keys.
+file dragging across monitor edges, automatic file-clipboard synchronization, dimming, session
+lock/wake synchronization, relative/raw gaming input, and system-wide media keys. Explicit file-list clipboard
+bridging is implemented but still needs the cross-application checks above.

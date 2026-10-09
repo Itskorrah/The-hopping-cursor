@@ -154,6 +154,11 @@ mod tests {
     fn rejects_malformed_and_trailing_plaintext() {
         assert!(decode_plain(&[]).is_err());
         assert!(decode_plain(&[255; 20]).is_err());
+        // Synthetic CI fuzz input: a truncated display list must fail cleanly.
+        assert!(decode_plain(include_bytes!(
+            "../tests/fixtures/malformed-display-count.bin"
+        ))
+        .is_err());
         let mut bytes = postcard::to_allocvec(&Message::Leave).unwrap();
         assert!(matches!(decode_plain(&bytes).unwrap(), Message::Leave));
         bytes.push(0);
@@ -247,5 +252,27 @@ mod tests {
         let mut client = TcpStream::connect(addr).await.unwrap();
         client.write_u16(0).await.unwrap();
         task.await.unwrap();
+    }
+}
+
+/// Exercise only bounded decrypted input; this feature is absent from release builds.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn fuzz_plaintext(bytes: &[u8]) {
+    if bytes.len() > MAX_FRAME - 16 {
+        return;
+    }
+    if let Ok(message) = decode_plain(bytes) {
+        if let Message::Input(event) = &message {
+            let _ = event.validate();
+        }
+        if let Message::Hello { device, .. } = &message {
+            for display in &device.displays {
+                let _ = display.bounds.valid();
+            }
+        }
+        let encoded = postcard::to_allocvec(&message).expect("Decoded message must serialize");
+        assert!(encoded.len() <= bytes.len());
+        assert!(decode_plain(&encoded).is_ok());
     }
 }
