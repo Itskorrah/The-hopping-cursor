@@ -110,3 +110,10 @@ thread; protected startup moved to a background thread with fail-closed IPC and
 a Quit control. OS file clipboard failure now preserves received files and
 reports a usable transfer-page fallback. New transfer and startup-IPC regressions
 bring verification to 55 Rust and 14 browser tests.
+
+0.1.2 package checkpoint: signed local Mac app opens with existing identity/peer
+and available permissions; native recovery IPC passes and sharing stays paused.
+Windows NSIS archive/AMD64/version/extracted bytes verify. Publish private
+v0.1.2-test.1 from 049d2ca and verify uploaded/downloaded ZIP hash. Hosted run
+37920694980 executes no steps under the existing account restriction. PR #2
+remains draft pending the physical Windows→Mac/cursor/file-clipboard retest.

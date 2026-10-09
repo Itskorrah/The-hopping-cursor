@@ -220,5 +220,7 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
 - Change: background startup with readiness/error guards for every engine command.
   Window and Quit are available before protected storage completes; no identity
   regeneration or security bypass.
-- Status: strict native desktop Clippy and IPC-mocked startup regression; refreshed
-  native launch verification is required after the owner's OS approval.
+- Status: strict native desktop Clippy and IPC-mocked startup regression pass.
+  The refreshed signed native Mac app opens with the existing identity and
+  all three permissions Available. Actual pending OS-dialog behavior remains
+  represented by a mock; no password/security bypass was performed.

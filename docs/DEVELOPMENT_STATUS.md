@@ -4,7 +4,10 @@ The project remains a development alpha. This pass continues the existing Rust/
 Tauri implementation and preserves peer identities, explicit approval, pinned
 keys, encrypted transport, separate bulk traffic, and emergency release.
 
-## Implemented in this pass
+Earlier sections record the initial setup checkpoint. The current **0.1.2**
+implementation and delivery evidence are recorded at the end of this document.
+
+## Implemented in the initial setup
 
 - Reconnect only paired identities; verify the expected key identity before
   exchanging introductions. Prefer remembered endpoints; keep bounded mDNS
@@ -212,3 +215,25 @@ An IPC-mocked browser check confirms no sample computers appear during this wait
 No Keychain approval, password bypass or new identity fallback was automated.
 Verified received files survive OS clipboard publication failure, with a visible
 diagnostic fallback; its encrypted transfer regression passes.
+
+### 0.1.2 delivery checkpoint
+
+The refreshed Apple Development-signed local Mac app verifies strictly and opens
+with the unchanged public identity and one saved PC pairing. Diagnostics shows
+capture, injection and clipboard Available; Bring input here succeeds via native
+IPC. Sharing remains paused. An incoming old PC connection is explicitly rejected
+for protocol mismatch; both computers must update. The protected startup wait
+is covered by the IPC mock; no human password entry was automated.
+
+The [Windows test release](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.2-test.1)
+is built from `049d2ca556c90e222cc0d874c715c0d3257a510b`. Its AMD64 application
+and NSIS installer report 0.1.2.0. Archive integrity and extracted application
+bytes pass with only the documented NSIS marker mutation. The uploaded ZIP and
+GitHub download round trip match SHA-256
+`b51b22c1ddeb44f19434bf846caa4d90e8c3f527ca6a89cfe461c923c1fd037d`.
+The package includes license, notices, build provenance and physical checklist.
+The installer is unsigned; actual Windows installation/runtime remains pending.
+Hosted run 37920694980 completed all five jobs with **zero executed steps**;
+its annotation reports failed recent account payments or a spending limit.
+Local builds used the already-authorized SDK route, without billing changes.
+PR #2 remains draft and the branch is unmerged pending physical acceptance.

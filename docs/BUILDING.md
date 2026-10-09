@@ -22,8 +22,8 @@ npm.cmd run tauri -w apps/desktop -- build --target x86_64-pc-windows-msvc --bun
 ```
 
 Stop if a command fails. The installer is under
-`target/x86_64-pc-windows-msvc/release/bundle/nsis/`. For 0.1.1, its filename is
-`The Hopping Cursor_0.1.1_x64-setup.exe`. Run that installer after quitting the
+`target/x86_64-pc-windows-msvc/release/bundle/nsis/`. For 0.1.2, its filename is
+`The Hopping Cursor_0.1.2_x64-setup.exe`. Run that installer after quitting the
 old app, reopen, and check the version shown in the sidebar. Existing pairings
 should remain; never delete the configuration to solve an update problem.
 
