@@ -67,6 +67,16 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
   input was not tested. The updated bundle builds locally; a later native window
   check was blocked because the Mac was locked.
 
+## Native CI evidence
+
+[Run 37880413374](https://github.com/Itskorrah/The-hopping-cursor/actions/runs/37880413374)
+passed on implementation commit b0344df: Linux core/UI, bounded parser fuzzing,
+Windows x64 NSIS and Intel/Apple Silicon DMG packages. Windows also exercised
+real user-bound DPAPI round-trip/tamper/non-overwrite and a disposable-runner
+CF_HDROP clipboard round-trip. These do not prove physical input or Explorer
+paste behavior. The package notice inventory was subsequently regenerated for
+new native dependencies and is checked by CI before packaging.
+
 ## Still required
 
 Physical Windows↔Mac/Mac↔Mac/Windows↔Windows input, permission denial/revocation,

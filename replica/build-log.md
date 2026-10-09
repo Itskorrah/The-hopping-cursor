@@ -47,3 +47,7 @@ Mac debug bundle. A bounded AddressSanitizer parser campaign completed 1,770,886
 cases in 61 seconds. Native Mac file URLs/privacy flags use isolated pasteboards;
 actual Keychain migration preserved the prior public identity. Physical peers,
 Finder/Explorer workflows, native permissions and soak/performance remain gaps.
+
+All five jobs in CI run 37880413374 passed on b0344df, including Windows DPAPI
+and disposable clipboard checks. Refreshed bundled notices after native dependency
+additions; CI now regenerates the inventory and rejects stale notices.

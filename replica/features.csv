@@ -27,5 +27,5 @@ Privacy-preserving diagnostics,diagnostics,should,yes,yes,No keys or content in 
 Consent by default,security,should,no,yes,Incoming files require approval unless deliberately disabled
 Display lifecycle,layout,must,yes,partial,Two-second hotplug refresh; Mac UUID and Windows monitor interface paths; physical dock testing pending
 Single instance,desktop,should,yes,partial,Second launch focuses existing window; native verification pending
-Protected identities,security,must,yes,partial,Keychain migration verified on Mac; DPAPI cross-compiled; Windows runtime validation pending
+Protected identities,security,must,yes,partial,Mac Keychain migration and Windows CI DPAPI tamper/round-trip verified; physical account-recovery validation pending
 Clipboard privacy markers,security,must,no,partial,Reference-app support unverified; Mac concealed/transient/generated and Windows history/cloud exclusions; unmarked secrets cannot be identified
