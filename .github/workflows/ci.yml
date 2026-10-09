@@ -99,10 +99,16 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test --locked -p hop-core windows_file_clipboard_round_trip -- --ignored
       - run: npm run tauri -w apps/desktop -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-      - name: Verify macOS application signature
+      - name: Verify packaged macOS application signature
         if: runner.os == 'macOS'
         shell: bash
-        run: codesign --verify --deep --strict --verbose=2 "target/${{ matrix.target }}/release/bundle/macos/The Hopping Cursor.app"
+        run: |
+          shopt -s nullglob
+          hop_disk_images=(target/${{ matrix.target }}/release/bundle/dmg/*.dmg)
+          test "${#hop_disk_images[@]}" -gt 0
+          for hop_disk_image in "${hop_disk_images[@]}"; do
+            python3 scripts/verify-macos-package.py "$hop_disk_image"
+          done
       - name: Verify installer exists
         shell: bash
         run: |
