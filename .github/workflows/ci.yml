@@ -47,7 +47,9 @@ jobs:
           workspaces: fuzz -> target
       - run: cargo install cargo-fuzz --version 0.13.2 --locked
       - run: cargo run --locked --manifest-path fuzz/Cargo.toml --example seed
-      - run: cargo +nightly fuzz run control_frames -- -max_total_time=60 -rss_limit_mb=512 -max_len=65519 -print_final_stats=1
+      - name: Replay malformed display regression under AddressSanitizer
+        run: cargo +nightly fuzz run control_frames crates/hop-core/tests/fixtures/malformed-display-count.bin -- -rss_limit_mb=512 -print_final_stats=1
+      - run: cargo +nightly fuzz run control_frames -- -max_total_time=60 -rss_limit_mb=2048 -max_len=65519 -print_final_stats=1
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
