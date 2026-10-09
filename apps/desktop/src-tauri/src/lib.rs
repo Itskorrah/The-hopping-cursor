@@ -93,6 +93,18 @@ async fn connect_address(engine: State<'_, Engine>, address: String) -> Result<(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+async fn send_copied_files(engine: State<'_, Engine>, peer: String) -> Result<(), String> {
+    engine
+        .inner()
+        .send_copied_files(&peer)
+        .await
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn copy_received_file(engine: State<'_, Engine>, id: String) -> Result<(), String> {
+    engine.copy_received_file(&id).map_err(|e| e.to_string())
+}
+#[tauri::command]
 async fn send_files(
     engine: State<'_, Engine>,
     peer: String,
@@ -142,7 +154,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![request_input_permissions,snapshot,update_settings,save_layout,approve_peer,forget_peer,peer_permissions,connect_address,send_files,respond_transfer,cancel_transfer,release_input,export_diagnostics,save_profile,load_profile,delete_profile,set_hop_key,jump_to_display])
+        .invoke_handler(tauri::generate_handler![send_copied_files,copy_received_file,request_input_permissions,snapshot,update_settings,save_layout,approve_peer,forget_peer,peer_permissions,connect_address,send_files,respond_transfer,cancel_transfer,release_input,export_diagnostics,save_profile,load_profile,delete_profile,set_hop_key,jump_to_display])
         .setup(|app|{
             let engine=tauri::async_runtime::block_on(Service::start(hop_core::config::default_config_dir()?,None,hop_core::platform::native()))?;app.manage(engine);
             let open=MenuItem::with_id(app,"open","Open The Hopping Cursor",true,None::<&str>)?;
@@ -153,7 +165,7 @@ pub fn run() {
             let mut tray=TrayIconBuilder::new().menu(&menu).tooltip("The Hopping Cursor").on_menu_event(|app,event|{
                 let engine=app.state::<Engine>();match event.id.as_ref(){
                     "open"=>if let Some(w)=app.get_webview_window("main"){let _=w.show();let _=w.set_focus();},
-                    "pause"=>{let mut settings=engine.snapshot().settings;settings.paused=!settings.paused;let _=engine.settings(settings);},
+                    "pause"=>{let mut settings=engine.snapshot().settings;settings.paused = !settings.paused;let _=engine.settings(settings);},
                     "release"=>engine.release(),"quit"=>{engine.shutdown();app.exit(0);},_=>{}
                 }
             });if let Some(icon)=app.default_window_icon(){tray=tray.icon(icon.clone());}tray.build(app)?;Ok(())

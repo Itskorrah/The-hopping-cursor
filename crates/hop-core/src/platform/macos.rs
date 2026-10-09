@@ -100,6 +100,10 @@ extern "C" {
     static kCFBooleanTrue: Ref;
     static kCFRunLoopCommonModes: Ref;
 }
+#[link(name = "Carbon", kind = "framework")]
+extern "C" {
+    fn IsSecureEventInputEnabled() -> bool;
+}
 struct TapContext {
     callback: CaptureCallback,
     tap: Ref,
@@ -109,6 +113,8 @@ extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
     unsafe {
         let ctx = &mut *(user as *mut TapContext);
         if kind >= 0xfffffffe {
+            ctx.modifiers.clear();
+            (ctx.callback)(CapturedEvent::Input(InputEvent::ReleaseAll));
             CGEventTapEnable(ctx.tap, true);
             return event;
         }
@@ -231,6 +237,13 @@ impl Platform for Mac {
                 .map(|id| (format!("display-{id}"), display_id(*id)))
                 .collect())
         }
+    }
+    fn session_available(&self) -> bool {
+        unsafe { !IsSecureEventInputEnabled() }
+    }
+    fn input_available(&self) -> bool {
+        let p = self.permissions();
+        p.capture && p.injection
     }
     fn permissions(&self) -> Permissions {
         unsafe {
@@ -413,6 +426,12 @@ impl Platform for Mac {
             CFRelease(e);
             Ok(())
         }
+    }
+    fn read_file_clipboard(&self) -> Result<Vec<std::path::PathBuf>> {
+        super::file_clipboard::read()
+    }
+    fn write_file_clipboard(&self, paths: &[std::path::PathBuf]) -> Result<()> {
+        super::file_clipboard::write(paths)
     }
     fn read_clipboard(&self) -> Result<Vec<ClipboardPart>> {
         super::clipboard::read()

@@ -131,3 +131,28 @@ pub(crate) fn put(_: &Path, _: &str, _: &[u8]) -> Result<()> {
 pub(crate) fn get(_: &Path, _: &str) -> Result<Zeroizing<Vec<u8>>> {
     anyhow::bail!("OS identity storage is unavailable on this platform")
 }
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::*;
+    #[test]
+    fn windows_dpapi_round_trip_tamper_and_non_overwrite() {
+        let directory = tempfile::tempdir().unwrap();
+        let reference = uuid::Uuid::new_v4().simple().to_string();
+        let synthetic_key = [0xa5; 32];
+        put(directory.path(), &reference, &synthetic_key).unwrap();
+        assert_eq!(
+            &**get(directory.path(), &reference).unwrap(),
+            &synthetic_key
+        );
+        assert!(put(directory.path(), &reference, &[0; 32]).is_err());
+        assert!(get(directory.path(), "../invalid").is_err());
+        let path = directory.path().join(format!("identity-{reference}.dpapi"));
+        let mut encrypted = std::fs::read(&path).unwrap();
+        assert!(!encrypted.windows(32).any(|part| part == synthetic_key));
+        let last = encrypted.len() - 1;
+        encrypted[last] ^= 1;
+        std::fs::write(path, encrypted).unwrap();
+        assert!(get(directory.path(), &reference).is_err());
+    }
+}

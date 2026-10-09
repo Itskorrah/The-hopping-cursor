@@ -119,6 +119,30 @@ impl Platform for Windows {
             .map(|d| (format!("display-{}", d.id), super::windows_display_id(d)))
             .collect())
     }
+    fn session_available(&self) -> bool {
+        use windows_sys::Win32::System::StationsAndDesktops::*;
+        unsafe {
+            let desktop = OpenInputDesktop(0, 0, DESKTOP_READOBJECTS);
+            if desktop.is_null() {
+                return false;
+            }
+            let mut name = [0u16; 256];
+            let mut needed = 0;
+            let ok = GetUserObjectInformationW(
+                desktop,
+                UOI_NAME,
+                name.as_mut_ptr() as _,
+                (name.len() * 2) as u32,
+                &mut needed,
+            );
+            CloseDesktop(desktop);
+            if ok == 0 {
+                return false;
+            }
+            let length = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+            String::from_utf16_lossy(&name[..length]).eq_ignore_ascii_case("default")
+        }
+    }
     fn permissions(&self) -> Permissions {
         Permissions{capture:true,injection:true,clipboard:true,explanation:"Normal desktop input available. Elevated apps and Windows secure desktop require additional privileged-service work.".into()}
     }
@@ -307,6 +331,12 @@ impl Platform for Windows {
             _ => {}
         }
         Ok(())
+    }
+    fn read_file_clipboard(&self) -> Result<Vec<std::path::PathBuf>> {
+        super::file_clipboard::read()
+    }
+    fn write_file_clipboard(&self, paths: &[std::path::PathBuf]) -> Result<()> {
+        super::file_clipboard::write(paths)
     }
     fn read_clipboard(&self) -> Result<Vec<ClipboardPart>> {
         super::clipboard::read()

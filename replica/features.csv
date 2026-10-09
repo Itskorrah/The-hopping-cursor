@@ -10,7 +10,7 @@ Clipboard text,clipboard,must,yes,partial,Real encrypted exchange tested with me
 Clipboard images and formatting,clipboard,should,yes,partial,PNG/HTML adapters compile; cross-app OS tests pending
 File transfers with progress,files,must,yes,yes,Encrypted streaming acceptance SHA-256 quotas and non-overwrite tested
 Native edge file drag,files,must,yes,no,App-window drag/drop works; Explorer/Finder cross-edge dragging not implemented
-Clipboard files,files,should,yes,no,Native file pasteboard bridge pending
+Clipboard files,files,should,yes,partial,Explicit Finder URLs and Explorer CF_HDROP actions through consented transfer; Mac isolated round-trip tested; automatic sync and physical cross-app checks pending
 Cursor lock,input,should,yes,partial,Edge-blocking toggle; native usage needs testing
 Game mode,input,should,yes,partial,Edge-blocking only; raw relative gaming input pending
 Hide displays,layout,should,yes,partial,Hidden displays excluded from routing; native held drags need validation
@@ -18,7 +18,7 @@ Layout profiles,layout,should,yes,yes,Persistent named profiles; hotplug reconci
 Per-device permissions,security,should,yes,yes,Input clipboard and file permission controls
 Monitor hop shortcuts,input,should,yes,partial,Persistent physical-key chords and per-monitor desktop controls; protocol and UI tested; native hardware pending
 Idle display dimming,power,should,yes,no,Hardware brightness adapter pending
-Lock wake session synchronization,power,should,yes,no,OS notifications and privileged integrations pending
+Lock wake session synchronization,power,should,yes,no,Protected-input and timing-gap safety recovery implemented; synchronized OS actions and full notifications pending
 Secure desktop control,input,could,yes,no,Windows service privilege work pending
 Commercial lifetime licensing,business,could,yes,skip,User-owned local alpha; commercial licensing deferred
 Signed installers,distribution,should,partial,no,Unsigned native CI packages; certificates not configured
@@ -28,3 +28,4 @@ Consent by default,security,should,no,yes,Incoming files require approval unless
 Display lifecycle,layout,must,yes,partial,Two-second hotplug refresh; Mac UUID and Windows monitor interface paths; physical dock testing pending
 Single instance,desktop,should,yes,partial,Second launch focuses existing window; native verification pending
 Protected identities,security,must,yes,partial,Keychain migration verified on Mac; DPAPI cross-compiled; Windows runtime validation pending
+Clipboard privacy markers,security,must,yes,partial,Mac concealed/transient/generated and Windows history/cloud exclusions; unmarked secrets cannot be identified

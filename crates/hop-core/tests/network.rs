@@ -589,3 +589,285 @@ async fn hotplug_releases_input_reconciles_profiles_and_refreshes_peer_metadata(
         .unwrap()
         .contains(&InputEvent::ReleaseAll));
 }
+
+#[tokio::test]
+async fn losing_all_displays_releases_input_without_erasing_saved_layout() {
+    let p = pair(true).await;
+    let before = p.a.snapshot();
+    let peer = p.b.snapshot().local.id;
+    p.a.jump_to_display(&peer, "headless-main").unwrap();
+    *p.pa.display_override.lock().unwrap() = Some(vec![]);
+    assert!(p.a.refresh_displays().is_err());
+    p.a.refresh_session(); // Permission polling must not re-enable missing displays.
+    assert_eq!(p.a.snapshot().active_device, before.local.id);
+    assert_eq!(p.a.snapshot().layout, before.layout);
+    assert!(p.a.jump_to_display(&peer, "headless-main").is_err());
+    *p.pa.display_override.lock().unwrap() = None;
+    assert!(!p.a.refresh_displays().unwrap());
+    wait(|| p.a.snapshot().peers.iter().any(|peer| peer.connected)).await;
+    p.a.jump_to_display(&peer, "headless-main").unwrap();
+}
+
+#[tokio::test]
+async fn shutdown_does_not_allow_manual_reconnection_or_leave_connected_status() {
+    let p = pair(true).await;
+    p.a.shutdown();
+    assert!(p.a.snapshot().peers.iter().all(|peer| !peer.connected));
+    assert!(p
+        .a
+        .connect(&format!("127.0.0.1:{}", p.b.listening_port))
+        .await
+        .is_err());
+    assert!(!p.a.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 4,
+        down: true
+    })));
+}
+
+#[tokio::test]
+async fn duplicate_incoming_offer_cannot_replace_pending_consent() {
+    use hop_core::{crypto::SecureConnection, BlobKind, Message};
+    let p = pair(false).await;
+    let path = p._a.path().join("original.txt");
+    tokio::fs::write(&path, b"original bytes").await.unwrap();
+    let source = p.a.clone();
+    let peer = p.b.snapshot().local.id;
+    let sending = tokio::spawn(async move { source.send_file(&peer, path).await });
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.state == "offered")
+    })
+    .await;
+    let original = p.b.snapshot().transfers[0].clone();
+    let identity = config::Identity::from_config(&config::load(p._a.path()).unwrap()).unwrap();
+    let stream = tokio::net::TcpStream::connect(("127.0.0.1", p.b.listening_port))
+        .await
+        .unwrap();
+    let connection = SecureConnection::handshake(stream, &identity, true)
+        .await
+        .unwrap();
+    let (mut reader, mut writer) = connection.split();
+    writer
+        .send(&Message::Hello {
+            version: 1,
+            device: p.a.snapshot().local,
+            purpose: "data".into(),
+            port: p.a.listening_port,
+            approved: true,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        reader.recv().await.unwrap(),
+        Message::Hello { approved: true, .. }
+    ));
+    writer
+        .send(&Message::BlobStart {
+            id: original.id.clone(),
+            kind: BlobKind::File,
+            name: "forged.txt".into(),
+            size: 0,
+            hash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+        })
+        .await
+        .unwrap();
+    let rejected = tokio::time::timeout(Duration::from_secs(2), reader.recv())
+        .await
+        .expect("Duplicate offer must close without waiting for consent");
+    assert!(rejected.is_err());
+    let pending =
+        p.b.snapshot()
+            .transfers
+            .into_iter()
+            .find(|t| t.id == original.id)
+            .unwrap();
+    assert_eq!(pending.name, "original.txt");
+    assert_eq!(pending.state, "offered");
+    p.b.respond_transfer(&original.id, true).unwrap();
+    sending.await.unwrap().unwrap();
+    assert_eq!(
+        tokio::fs::read(p._b.path().join("received/original.txt"))
+            .await
+            .unwrap(),
+        b"original bytes"
+    );
+}
+
+#[tokio::test]
+async fn copied_files_use_consent_and_only_verified_received_files_are_publishable() {
+    let p = pair(false).await;
+    let path = p._a.path().join("copied.txt");
+    tokio::fs::write(&path, b"clipboard file test")
+        .await
+        .unwrap();
+    *p.pa.file_clipboard.lock().unwrap() = vec![path.clone(), path];
+    let source = p.a.clone();
+    let peer = p.b.snapshot().local.id;
+    let sending = tokio::spawn(async move { source.send_copied_files(&peer).await });
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.state == "offered")
+    })
+    .await;
+    let id = p.b.snapshot().transfers[0].id.clone();
+    assert!(p.b.copy_received_file(&id).is_err());
+    assert!(p.pb.file_clipboard.lock().unwrap().is_empty());
+    p.b.respond_transfer(&id, true).unwrap();
+    sending.await.unwrap().unwrap();
+    p.b.copy_received_file(&id).unwrap();
+    assert_eq!(
+        *p.pb.file_clipboard.lock().unwrap(),
+        vec![p
+            ._b
+            .path()
+            .join("received/copied.txt")
+            .canonicalize()
+            .unwrap()]
+    );
+    assert!(p.a.copy_received_file(&id).is_err());
+    assert_eq!(
+        p.b.snapshot().transfers.len(),
+        1,
+        "Duplicate source clipboard entries must not send twice"
+    );
+    let peer = p.b.snapshot().local.id;
+    p.a.peer_permissions(&peer, true, false, true).unwrap();
+    assert!(p.a.send_copied_files(&peer).await.is_err());
+}
+
+#[tokio::test]
+async fn bulk_pressure_is_bounded_and_control_heartbeats_continue() {
+    let p = pair(false).await;
+    let path = p._a.path().join("pressure.txt");
+    tokio::fs::write(&path, b"bounded bulk").await.unwrap();
+    let peer = p.b.snapshot().local.id;
+    let mut jobs = Vec::new();
+    for _ in 0..4 {
+        let source = p.a.clone();
+        let peer = peer.clone();
+        let path = path.clone();
+        jobs.push(tokio::spawn(
+            async move { source.send_file(&peer, path).await },
+        ));
+    }
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .filter(|t| t.state == "offered")
+            .count()
+            == 4
+    })
+    .await;
+    assert!(p
+        .a
+        .send_file(&peer, path)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("Four bulk transfers"));
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(p
+        .a
+        .snapshot()
+        .peers
+        .iter()
+        .any(|peer| peer.connected && peer.latency_ms.is_some()));
+    p.a.release();
+    for transfer in p.b.snapshot().transfers {
+        p.b.respond_transfer(&transfer.id, false).unwrap();
+    }
+    for job in jobs {
+        assert!(job.await.unwrap().is_err());
+    }
+    assert!(p.a.snapshot().peers.iter().any(|peer| peer.connected));
+}
+
+#[tokio::test]
+async fn protected_session_releases_input_cancels_offers_and_recovers() {
+    use std::sync::atomic::Ordering;
+    let p = pair(false).await;
+    let peer = p.b.snapshot().local.id;
+    p.a.jump_to_display(&peer, "headless-main").unwrap();
+    let path = p._a.path().join("session.txt");
+    tokio::fs::write(&path, b"session transition")
+        .await
+        .unwrap();
+    let source = p.a.clone();
+    let id = peer.clone();
+    let file = path.clone();
+    let task = tokio::spawn(async move { source.send_file(&id, file).await });
+    wait(|| {
+        p.b.snapshot()
+            .transfers
+            .iter()
+            .any(|t| t.state == "offered")
+    })
+    .await;
+    p.pa.session_blocked.store(true, Ordering::SeqCst);
+    p.a.refresh_session();
+    assert!(!p.a.snapshot().session_available);
+    assert_eq!(p.a.snapshot().active_device, p.a.snapshot().local.id);
+    assert!(task.await.unwrap().is_err());
+    assert!(p.a.send_file(&peer, path).await.is_err());
+    assert!(p.a.jump_to_display(&peer, "headless-main").is_err());
+    p.pa.session_blocked.store(false, Ordering::SeqCst);
+    p.a.refresh_session();
+    wait(|| {
+        p.a.snapshot().peers.iter().any(|p| p.connected)
+            && p.b.snapshot().peers.iter().any(|p| p.connected)
+    })
+    .await;
+    assert!(p
+        .pb
+        .events
+        .lock()
+        .unwrap()
+        .contains(&InputEvent::ReleaseAll));
+}
+
+#[tokio::test]
+async fn wake_recovery_clears_ownership_and_pressed_modifier_state() {
+    let p = pair(true).await;
+    p.a.capture(CapturedEvent::Input(InputEvent::Key {
+        code: 224,
+        down: true,
+    }));
+    p.a.jump_to_display(&p.b.snapshot().local.id, "headless-main")
+        .unwrap();
+    wait(|| {
+        p.pb.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 224,
+            down: true,
+        })
+    })
+    .await;
+    p.pa.events.lock().unwrap().clear();
+    p.a.recover_session_gap();
+    assert_eq!(p.a.snapshot().active_device, p.a.snapshot().local.id);
+    assert!(
+        !p.a.capture(CapturedEvent::Input(InputEvent::Key {
+            code: 41,
+            down: true
+        })),
+        "Stale Ctrl state must not turn a later Escape into a recovery chord"
+    );
+    assert!(
+        !p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 224,
+            down: true
+        }),
+        "Recovery must not restore a stale physical modifier"
+    );
+    wait(|| {
+        p.pb.events
+            .lock()
+            .unwrap()
+            .contains(&InputEvent::ReleaseAll)
+    })
+    .await;
+}

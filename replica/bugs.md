@@ -13,7 +13,7 @@
 - Fix: tests now isolate multicast; discovered candidates no longer auto-connect,
   hints do not overwrite verified addresses, inbound endpoints persist, and
   simultaneous channels converge. Separate real discovery/rename check passes.
-- Status: fixed in the desktop-hardening batch; parallel suite passes.
+- Status: fixed in 1091ac5 (native CI checks in 8c8de86); parallel suite passes.
 
 ### BUG-002: Strict Clippy fails in native Mac clipboard conversion
 
@@ -22,7 +22,7 @@
 - Expected: clean native adapter checks.
 - Actual: chunks_exact_to_as_chunks lint fails two PNG conversion paths.
 - Fix: typed slice chunks; strict native Clippy also added to CI.
-- Status: fixed in the desktop-hardening batch.
+- Status: fixed in 1091ac5 (native CI checks in 8c8de86).
 
 ### BUG-003: Connected count includes the local computer
 
@@ -31,7 +31,43 @@
 - Expected: zero paired and connected computers.
 - Actual: summary claims one paired computer.
 - Fix: show the actual connected peer count.
-- Status: fixed in the desktop-hardening batch.
+- Status: fixed in 1091ac5 (native CI checks in 8c8de86).
+
+### BUG-004: Missing displays leave stale routing eligible
+
+- Severity: S2
+- Steps: route to a peer; make the source display backend return no monitors;
+  refresh displays and poll permissions.
+- Expected: release input and suspend routing while retaining the saved layout.
+- Actual: refresh returned an error before releasing ownership.
+- Fix: gate input on usable displays independently of permission polling;
+  restore routing only after valid displays return. Regression passes.
+- Status: fixed in the session/clipboard hardening batch.
+
+### BUG-005: Shutdown retains connected status and permits new connections
+
+- Severity: S2
+- Steps: pair two test services, shut one down, inspect its snapshot and attempt
+  a manual connection.
+- Expected: disconnected status, no new control sessions or live reader tasks.
+- Actual: the new regression fails on retained connected status; connection
+  admission had no stop check and early task exit bypassed reader cleanup.
+- Fix: stop admission, clear peer state and channels, and run task cleanup even
+  if shutdown happened before the control task was scheduled.
+- Status: fixed in the session/clipboard hardening batch; regression passes.
+
+### BUG-006: Reused transfer ID disrupts pending consent
+
+- Severity: S2
+- Steps: pair a peer, send an offer, then send another authenticated data offer
+  with the same ID and a different filename while the first awaits approval.
+- Expected: reject the duplicate and keep the original offer/decision intact.
+- Actual: the regression fails; duplicate state/decision replacement disrupts
+  the first transfer and returns a consent response to the duplicate session.
+- Fix: reserve incoming IDs atomically for the full operation and reject IDs
+  still present in transfer history. Cleanup releases reservations on every exit.
+- Status: fixed in the session/clipboard hardening batch; original transfer
+  completes byte-for-byte after duplicate rejection in the regression.
 
 ## To check on physical hardware
 

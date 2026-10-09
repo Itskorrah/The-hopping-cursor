@@ -249,3 +249,25 @@ mod tests {
         task.await.unwrap();
     }
 }
+
+/// Exercise only bounded decrypted input; this feature is absent from release builds.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn fuzz_plaintext(bytes: &[u8]) {
+    if bytes.len() > MAX_FRAME - 16 {
+        return;
+    }
+    if let Ok(message) = decode_plain(bytes) {
+        if let Message::Input(event) = &message {
+            let _ = event.validate();
+        }
+        if let Message::Hello { device, .. } = &message {
+            for display in &device.displays {
+                let _ = display.bounds.valid();
+            }
+        }
+        let encoded = postcard::to_allocvec(&message).expect("Decoded message must serialize");
+        assert!(encoded.len() <= bytes.len());
+        assert!(decode_plain(&encoded).is_ok());
+    }
+}

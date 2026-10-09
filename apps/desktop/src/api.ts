@@ -100,6 +100,7 @@ const sample: Snapshot = {
     "Interface preview loaded. No native input, network, or file sharing is running.",
   ],
   version: "0.1.0",
+  session_available: true,
 };
 let preview: Snapshot;
 try {

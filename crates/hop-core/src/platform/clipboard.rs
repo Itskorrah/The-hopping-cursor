@@ -1,6 +1,10 @@
 use crate::model::ClipboardPart;
 use anyhow::Result;
 pub fn read() -> Result<Vec<ClipboardPart>> {
+    let before = super::clipboard_privacy::stamp()?;
+    if before.1 {
+        return Ok(vec![]);
+    }
     let mut c = arboard::Clipboard::new()?;
     let mut parts = vec![];
     if let Ok(text) = c.get_text() {
@@ -39,6 +43,11 @@ pub fn read() -> Result<Vec<ClipboardPart>> {
                 data,
             });
         }
+    }
+    // Multiple native formats are read separately. Discard a changing clipboard
+    // rather than forwarding a mixture or missing a new confidentiality marker.
+    if super::clipboard_privacy::stamp()? != before {
+        return Ok(vec![]);
     }
     Ok(parts)
 }

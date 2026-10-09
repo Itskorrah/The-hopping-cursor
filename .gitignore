@@ -12,3 +12,6 @@ playwright-report/
 .local/
 *.tsbuildinfo
 apps/desktop/src-tauri/gen/
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/coverage/

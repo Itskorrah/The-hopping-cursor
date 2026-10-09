@@ -25,12 +25,35 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
 - Migrate native identity keys to macOS Keychain or user-bound Windows DPAPI.
   Verify read-back before removing the key from JSON. Failed migration preserves
   the original; inaccessible protected keys fail closed without rotation.
+- Add explicit native file clipboard actions: read Finder file URLs / Explorer
+  CF_HDROP lists, send through existing consented transfers, and copy only verified
+  local received files back for pasting. Folders, file promises, automatic file
+  clipboard synchronization, and cross-edge OS dragging remain unimplemented.
+- Bound incoming/outgoing bulk work to four transfers each; pending consent no
+  longer holds control handshake slots. Failed clipboard sends can retry.
+  Duplicate incoming IDs cannot replace an existing consent prompt.
+- Suspend sharing during Mac Secure Event Input / unavailable Windows input
+  desktop, detect permission loss and Mac tap disablement, and clear stale held
+  state after sleep/scheduling/clock gaps. Missing displays release input while
+  preserving saved layouts. This does not synchronize OS power or lock state.
+- Respect Mac concealed/transient/generated markers and Windows clipboard
+  history/cloud exclusion flags; discard clipboard changes during a read.
+  Unmarked sensitive content cannot be detected reliably.
+- Ensure shutdown marks peers disconnected, rejects new manual connections,
+  and aborts reader tasks even when stop precedes task scheduling.
+- Add a bounded parser fuzz harness with synthetic seeds and AddressSanitizer.
 - Fix current stable Rust's macOS clipboard lint; check native Clippy in CI.
 
 ## Verified locally
 
-- 33 Rust tests pass in parallel on Apple Silicon macOS: 17 unit/security and
-  16 real encrypted TCP integration tests with an in-memory OS adapter.
+- 42 Rust tests pass in parallel on Apple Silicon macOS: 19 unit/security/native and
+  23 real encrypted TCP integration tests with an in-memory OS adapter.
+- Native Mac file-URL round trips and privacy-marker checks pass on isolated
+  pasteboards, including Unicode filesystem identities; the user's clipboard
+  is not replaced by these tests. Finder/Explorer destination behavior still
+  needs cross-application acceptance testing.
+- A 61-second AddressSanitizer parser campaign executed 1,770,886 cases without
+  a crash/assertion, peak RSS 353 MiB. This is a bounded smoke campaign.
 - The separate two-service multicast discovery/rename test passes on this LAN.
 - Strict Clippy passes for Apple Silicon, Intel Mac, and Windows x64 core/CLI.
   Cross-compilation verifies types and API declarations; it is not Windows or
@@ -39,14 +62,17 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
   five pages and a 390px viewport. These exercise the labelled browser preview.
 - Native Mac debug bundle builds and launches with real local display data.
   Actual Keychain migration preserved the preexisting public identity and removed
-  the private key from the real JSON config. macOS still reports missing input
-  permission; the request button was exercised. Cross-computer input was not.
+  the private key from the real JSON config. The last native window check reported
+  missing input permission; the request button was exercised. Cross-computer
+  input was not tested. The updated bundle builds locally; a later native window
+  check was blocked because the Mac was locked.
 
 ## Still required
 
 Physical Windows↔Mac/Mac↔Mac/Windows↔Windows input, permission denial/revocation,
 held drags, layouts, mixed DPI, pasteboards, reconnect/sleep and multi-hour soak
-validation. Native Finder/Explorer edge dragging and file clipboard, dimming,
+validation. Native Finder/Explorer edge dragging, automatic file clipboard
+synchronization, folder/file-promise support, dimming,
 lock/wake synchronization, raw game input, media/vendor keys, international
 layout coverage, and privileged Windows secure desktop support remain unfinished.
 Signing/notarization, verified signed updates, measured latency/throughput and

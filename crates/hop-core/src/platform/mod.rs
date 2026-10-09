@@ -4,6 +4,10 @@ use std::sync::Arc;
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod clipboard;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod clipboard_privacy;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod file_clipboard;
 mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -17,6 +21,12 @@ pub trait Platform: Send + Sync {
         Ok(Default::default())
     }
     fn permissions(&self) -> Permissions;
+    fn session_available(&self) -> bool {
+        true
+    }
+    fn input_available(&self) -> bool {
+        true
+    }
     fn request_permissions(&self) -> Permissions {
         self.permissions()
     }
@@ -28,6 +38,12 @@ pub trait Platform: Send + Sync {
         None
     }
     fn write_clipboard(&self, parts: &[ClipboardPart]) -> Result<()>;
+    fn read_file_clipboard(&self) -> Result<Vec<std::path::PathBuf>> {
+        anyhow::bail!("File clipboard is unavailable on this platform")
+    }
+    fn write_file_clipboard(&self, _paths: &[std::path::PathBuf]) -> Result<()> {
+        anyhow::bail!("File clipboard is unavailable on this platform")
+    }
 }
 pub fn native() -> Arc<dyn Platform> {
     #[cfg(target_os = "windows")]
@@ -48,11 +64,18 @@ pub fn native() -> Arc<dyn Platform> {
 /// Linux input support. An in-memory clipboard enables deterministic integration tests.
 #[derive(Default)]
 pub struct Headless {
+    pub session_blocked: std::sync::atomic::AtomicBool,
     pub events: std::sync::Mutex<Vec<InputEvent>>,
     pub clipboard: std::sync::Mutex<Vec<ClipboardPart>>,
+    pub file_clipboard: std::sync::Mutex<Vec<std::path::PathBuf>>,
     pub display_override: std::sync::Mutex<Option<Vec<Display>>>,
 }
 impl Platform for Headless {
+    fn session_available(&self) -> bool {
+        !self
+            .session_blocked
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
     fn name(&self) -> &str {
         "headless"
     }
@@ -86,6 +109,13 @@ impl Platform for Headless {
     }
     fn read_clipboard(&self) -> Result<Vec<ClipboardPart>> {
         Ok(self.clipboard.lock().unwrap().clone())
+    }
+    fn read_file_clipboard(&self) -> Result<Vec<std::path::PathBuf>> {
+        Ok(self.file_clipboard.lock().unwrap().clone())
+    }
+    fn write_file_clipboard(&self, paths: &[std::path::PathBuf]) -> Result<()> {
+        *self.file_clipboard.lock().unwrap() = paths.to_vec();
+        Ok(())
     }
     fn write_clipboard(&self, parts: &[ClipboardPart]) -> Result<()> {
         *self.clipboard.lock().unwrap() = parts.to_vec();

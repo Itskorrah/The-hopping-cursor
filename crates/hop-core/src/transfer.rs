@@ -41,6 +41,15 @@ struct PartialFile {
     path: PathBuf,
     file: Option<File>,
 }
+struct IncomingTransfer<'a> {
+    active: &'a std::sync::Mutex<std::collections::BTreeSet<String>>,
+    id: String,
+}
+impl Drop for IncomingTransfer<'_> {
+    fn drop(&mut self) {
+        self.active.lock().unwrap().remove(&self.id);
+    }
+}
 impl Drop for PartialFile {
     fn drop(&mut self) {
         self.file.take();
@@ -71,7 +80,10 @@ impl Service {
     fn outgoing_allowed(&self, peer: &str, clipboard: bool) -> Result<()> {
         let c = self.config.lock().unwrap();
         anyhow::ensure!(
-            !c.settings.paused
+            self.session_available
+                .load(std::sync::atomic::Ordering::SeqCst)
+                && !*self.stop.borrow()
+                && !c.settings.paused
                 && c.peers.get(peer).is_some_and(|p| if clipboard {
                     p.allow_clipboard
                 } else {
@@ -165,8 +177,57 @@ impl Service {
             .or_else(|| trusted.address.clone())
             .context("Connect to this computer's local address first")
     }
+    /// Explicit user action; file paths never travel over the clipboard protocol.
+    pub async fn send_copied_files(self: &Arc<Self>, peer: &str) -> Result<()> {
+        self.outgoing_allowed(peer, false)?;
+        self.outgoing_allowed(peer, true)?;
+        let backend = self.backend.clone();
+        let mut paths =
+            tokio::task::spawn_blocking(move || backend.read_file_clipboard()).await??;
+        paths.sort();
+        paths.dedup();
+        anyhow::ensure!(
+            !paths.is_empty() && paths.len() <= 100,
+            "Copy 1–100 files in Finder or Explorer first"
+        );
+        for path in &paths {
+            anyhow::ensure!(
+                path.is_absolute() && tokio::fs::metadata(path).await?.is_file(),
+                "Copy regular files; zip folders first"
+            );
+        }
+        for path in paths {
+            self.send_file(peer, path).await?;
+        }
+        Ok(())
+    }
+    pub fn copy_received_file(&self, id: &str) -> Result<()> {
+        let path = {
+            let state = self.state.lock().unwrap();
+            let transfer = state.transfers.get(id).context("Unknown transfer")?;
+            anyhow::ensure!(
+                transfer.direction == "incoming" && transfer.state == "complete",
+                "Only verified received files can be copied"
+            );
+            PathBuf::from(
+                transfer
+                    .saved_path
+                    .as_ref()
+                    .context("Transfer has no saved file")?,
+            )
+        };
+        anyhow::ensure!(
+            path.is_absolute() && std::fs::symlink_metadata(&path)?.file_type().is_file(),
+            "Received file was moved or replaced"
+        );
+        self.backend.write_file_clipboard(&[path])
+    }
     pub async fn send_file(self: &Arc<Self>, peer: &str, path: PathBuf) -> Result<()> {
         self.outgoing_allowed(peer, false)?;
+        let _bulk = self
+            .outgoing_bulk
+            .try_acquire()
+            .context("Four bulk transfers are already active; retry shortly")?;
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
@@ -214,6 +275,10 @@ impl Service {
     }
     pub(crate) async fn send_clipboard(self: &Arc<Self>, peer: &str, data: Vec<u8>) -> Result<()> {
         self.outgoing_allowed(peer, true)?;
+        let _bulk = self
+            .outgoing_bulk
+            .try_acquire()
+            .context("Clipboard deferred while bulk transfers are busy")?;
         anyhow::ensure!(
             data.len() as u64 <= CLIPBOARD_LIMIT,
             "Clipboard exceeds 8 MiB limit"
@@ -287,6 +352,9 @@ impl Service {
             })
         };
         let allowed = allowed
+            && self
+                .session_available
+                .load(std::sync::atomic::Ordering::SeqCst)
             && !settings.paused
             && match kind {
                 BlobKind::File => safe_filename(&name) && size <= settings.max_file_bytes,
@@ -306,6 +374,18 @@ impl Service {
                 .await?;
             return Ok(());
         }
+        let _reservation = {
+            let mut incoming = self.incoming_transfers.lock().unwrap();
+            anyhow::ensure!(
+                !incoming.contains(&id) && !self.state.lock().unwrap().transfers.contains_key(&id),
+                "Duplicate transfer identity"
+            );
+            incoming.insert(id.clone());
+            IncomingTransfer {
+                active: &self.incoming_transfers,
+                id: id.clone(),
+            }
+        };
         let is_file = matches!(kind, BlobKind::File);
         let mut stop = self.stop.subscribe();
         if is_file {
@@ -349,7 +429,7 @@ impl Service {
             writer.send(&Message::BlobAccept{id:id.clone(),accepted:true}).await?;
             let mut memory=vec![];let mut offset=0u64;let mut digest=Sha256::new();loop {
                 anyhow::ensure!(!self.cancelled.lock().unwrap().contains(&id),"Transfer cancelled");
-                let still_allowed={let c=self.config.lock().unwrap();!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files}else{p.allow_clipboard})};anyhow::ensure!(still_allowed,"Sharing permission revoked");
+                let still_allowed={let c=self.config.lock().unwrap();self.session_available.load(std::sync::atomic::Ordering::SeqCst)&&!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files}else{p.allow_clipboard})};anyhow::ensure!(still_allowed,"Sharing permission revoked");
                 let message=tokio::select!{_=stop.changed()=>anyhow::bail!("Application stopped"),_=self.wait_cancel(&id)=>anyhow::bail!("Transfer cancelled"),r=tokio::time::timeout(Duration::from_secs(20),reader.recv())=>r.context("Transfer stalled")??};
                 match message {
                     Message::BlobChunk{id:got,offset:at,data}=>{
@@ -360,7 +440,7 @@ impl Service {
                 }
             }
             anyhow::ensure!(hex::encode(digest.finalize())==hash,"Integrity verification failed; file was not saved");
-            {let c=self.config.lock().unwrap();anyhow::ensure!(!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files}else{p.allow_clipboard}),"Sharing permission revoked before publication");}
+            {let c=self.config.lock().unwrap();anyhow::ensure!(self.session_available.load(std::sync::atomic::Ordering::SeqCst)&&!c.settings.paused&&c.peers.get(&peer).is_some_and(|p|if is_file{p.allow_files}else{p.allow_clipboard}),"Sharing permission revoked before publication");}
             if let Some(mut p)=partial {
                 let file=p.file.take().unwrap();file.sync_all().await?;drop(file);let dir=p.path.parent().unwrap();let mut destination=None;
                 for n in 0..10000 {let candidate=dir.join(if n==0{name.clone()}else{let path=Path::new(&name);let stem=path.file_stem().and_then(|v|v.to_str()).unwrap_or("file");let ext=path.extension().and_then(|v|v.to_str());match ext{Some(ext)=>format!("{stem} ({n}).{ext}"),None=>format!("{stem} ({n})")}});

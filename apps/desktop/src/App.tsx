@@ -401,6 +401,9 @@ export default function App() {
               <button onClick={() => void refresh()}>Retry</button>
             </div>
           )}
+          {native && !data.session_available && (
+            <div className="notice" role="status">Sharing is suspended while the OS input session is protected. Return to the normal desktop or leave secure keyboard entry to resume.</div>
+          )}
           {native &&
             (!data.permissions.capture || !data.permissions.injection) && (
               <div className="notice">
@@ -650,8 +653,8 @@ export default function App() {
                   <Upload size={29} />
                   <h2>Send a file, without the cloud.</h2>
                   <p>
-                    Choose a paired computer and select files, or drop files
-                    into this window.
+                    Choose a paired computer and select files, drop files into
+                    this window, or send files copied in Finder or Explorer.
                   </p>
                 </div>
                 <div className="transfer-controls">
@@ -674,6 +677,18 @@ export default function App() {
                   >
                     <Plus size={16} />
                     Choose files
+                  </button>
+                  <button
+                    className="button secondary"
+                    disabled={!filePeer || !native}
+                    onClick={() =>
+                      void run(
+                        () => call("send_copied_files", { peer: filePeer }),
+                        "Copied files sent and verified",
+                      )
+                    }
+                  >
+                    Send copied files
                   </button>
                 </div>
                 {dropPaths.length > 0 && (
@@ -718,6 +733,12 @@ export default function App() {
                       }
                       cancel={() =>
                         void run(() => call("cancel_transfer", { id: t.id }))
+                      }
+                      copy={() =>
+                        void run(
+                          () => call("copy_received_file", { id: t.id }),
+                          "File copied. Paste in Finder or Explorer to copy it to another folder.",
+                        )
                       }
                     />
                   ))
@@ -1134,10 +1155,12 @@ function TransferRow({
   t,
   accept,
   cancel,
+  copy,
 }: {
   t: Transfer;
   accept: (v: boolean) => void;
   cancel: () => void;
+  copy: () => void;
 }) {
   return (
     <div className="transfer-row">
@@ -1159,6 +1182,9 @@ function TransferRow({
         )}
         <p className="device-error">{t.error}</p>
         {t.saved_path && <small>Saved to {t.saved_path}</small>}
+        {native && t.direction === "incoming" && t.state === "complete" && t.saved_path && (
+          <button className="text-button" onClick={copy} aria-label={`Copy received ${t.name}`}>Copy file for pasting</button>
+        )}
       </div>
       {t.state === "offered" ? (
         <div className="transfer-buttons">

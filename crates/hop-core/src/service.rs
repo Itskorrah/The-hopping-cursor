@@ -13,10 +13,10 @@ use std::{
     net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -101,6 +101,14 @@ pub struct Service {
     pub(crate) decisions: Mutex<BTreeMap<String, oneshot::Sender<bool>>>,
     pub(crate) cancelled: Mutex<BTreeSet<String>>,
     pub(crate) stop: watch::Sender<bool>,
+    pub(crate) outgoing_bulk: tokio::sync::Semaphore,
+    incoming_bulk: tokio::sync::Semaphore,
+    pub(crate) incoming_transfers: Mutex<BTreeSet<String>>,
+    clipboard_retry: AtomicBool,
+    pub(crate) session_available: AtomicBool,
+    input_available: AtomicBool,
+    displays_available: AtomicBool,
+    session_clock: Mutex<SystemTime>,
     metadata_changed: watch::Sender<u64>,
     pub listening_port: u16,
 }
@@ -179,6 +187,8 @@ impl Service {
                 )
             })
             .collect();
+        let session_available = backend.session_available();
+        let input_available = backend.input_available();
         let this = Arc::new(Self {
             identity,
             routing: ArcSwap::from_pointee(RoutingConfig::from(&config)),
@@ -205,6 +215,14 @@ impl Service {
             decisions: Mutex::new(BTreeMap::new()),
             cancelled: Mutex::new(BTreeSet::new()),
             stop,
+            outgoing_bulk: tokio::sync::Semaphore::new(4),
+            incoming_bulk: tokio::sync::Semaphore::new(4),
+            incoming_transfers: Mutex::new(BTreeSet::new()),
+            clipboard_retry: AtomicBool::new(false),
+            session_available: AtomicBool::new(session_available),
+            input_available: AtomicBool::new(input_available),
+            displays_available: AtomicBool::new(true),
+            session_clock: Mutex::new(SystemTime::now()),
             listening_port,
             metadata_changed,
         });
@@ -227,7 +245,10 @@ impl Service {
             loop {
                 tokio::select! {_ = stop.changed()=>break,result=listener.accept()=>match result{Ok((stream,address))=>{
                     if !local_ip(address.ip()){continue;}let Ok(permit)=permits.clone().try_acquire_owned() else {continue;};
-                    let s=s.clone();tokio::spawn(async move{let _permit=permit;if let Err(e)=s.accept(stream,address).await{s.note(format!("Incoming connection: {e}"));}});
+                    let s=s.clone();tokio::spawn(async move{
+                        let mut stop = s.stop.subscribe(); if *stop.borrow() { return; }
+                        tokio::select! { biased; _=stop.changed()=>{}, result=s.accept(stream,address,permit)=>{if let Err(e)=result{s.note(format!("Incoming connection: {e}"));}} }
+                    });
                 },Err(e)=>s.note(format!("Listener: {e}"))}}
             }
         });
@@ -237,6 +258,7 @@ impl Service {
         this.start_reconnect();
         this.start_clipboard();
         this.start_display_refresh();
+        this.start_session_monitor();
         Ok(this)
     }
     /// Called only by an explicit user action; never prompts during background work.
@@ -288,6 +310,7 @@ impl Service {
             listening_port: self.listening_port,
             diagnostics: s.diagnostics.clone(),
             version: env!("CARGO_PKG_VERSION").into(),
+            session_available: self.session_available.load(Ordering::SeqCst),
         }
     }
     pub(crate) fn note(&self, text: String) {
@@ -440,6 +463,11 @@ impl Service {
         Ok(())
     }
     pub fn jump_to_display(&self, device_id: &str, display_id: &str) -> Result<()> {
+        anyhow::ensure!(
+            self.session_available.load(Ordering::SeqCst)
+                && self.input_available.load(Ordering::SeqCst),
+            "Input sharing is unavailable in the current OS session"
+        );
         let c = self.routing.load();
         anyhow::ensure!(
             !c.settings.paused,
@@ -627,10 +655,9 @@ impl Service {
         }
     }
     pub fn shutdown(&self) {
-        self.release();
-        self.backend.stop_capture();
         self.stop.send_replace(true);
-        self.channels.lock().unwrap().clear();
+        self.disconnect_controls();
+        self.backend.stop_capture();
         self.decisions.lock().unwrap().clear();
     }
     fn disconnect_controls(&self) {
@@ -644,14 +671,27 @@ impl Service {
         }
     }
     pub fn refresh_displays(&self) -> Result<bool> {
-        let displays = self.backend.displays()?;
-        anyhow::ensure!(
-            !displays.is_empty() && displays.iter().all(|d| d.bounds.valid()),
-            "No usable displays available"
-        );
+        let displays = match self.backend.displays() {
+            Ok(displays) if !displays.is_empty() && displays.iter().all(|d| d.bounds.valid()) => {
+                displays
+            }
+            _ => {
+                // Preserve the saved arrangement, but never route into stale displays.
+                self.displays_available.store(false, Ordering::SeqCst);
+                self.input_available.store(false, Ordering::SeqCst);
+                self.clear_physical_state();
+                self.disconnect_controls();
+                anyhow::bail!("No usable displays available; input sharing suspended");
+            }
+        };
         if self.state.lock().unwrap().local.displays == displays {
+            self.displays_available.store(true, Ordering::SeqCst);
+            self.input_available
+                .store(self.backend.input_available(), Ordering::SeqCst);
             return Ok(false);
         }
+        self.displays_available.store(false, Ordering::SeqCst);
+        self.input_available.store(false, Ordering::SeqCst);
         self.disconnect_controls();
         let aliases = self.backend.display_id_aliases()?;
         let mut config = self.config.lock().unwrap();
@@ -679,9 +719,71 @@ impl Service {
         }
         drop(state);
         drop(config);
+        self.displays_available.store(true, Ordering::SeqCst);
+        self.input_available
+            .store(self.backend.input_available(), Ordering::SeqCst);
         self.metadata_changed.send_modify(|n| *n += 1);
         self.note("Display configuration refreshed; input returned locally".into());
         Ok(true)
+    }
+    pub fn refresh_session(&self) {
+        let now = SystemTime::now();
+        let gap = {
+            let mut clock = self.session_clock.lock().unwrap();
+            let gap = now
+                .duration_since(*clock)
+                .map_or(true, |gap| gap > Duration::from_secs(3));
+            *clock = now;
+            gap
+        };
+        if gap {
+            self.recover_session_gap();
+        }
+        let available = self.backend.session_available();
+        let input =
+            self.backend.input_available() && self.displays_available.load(Ordering::SeqCst);
+        let was_available = self.session_available.swap(available, Ordering::SeqCst);
+        let had_input = self.input_available.swap(input, Ordering::SeqCst);
+        if (was_available && !available) || (had_input && !input) {
+            self.clear_physical_state();
+            self.disconnect_controls();
+            if !available {
+                self.cancel_peer_files(None);
+            }
+            self.note("OS input/session unavailable; released input and suspended sharing".into());
+        } else if !was_available && available {
+            self.note("OS session available; paired computers can reconnect".into());
+        }
+    }
+    /// Conservative recovery after sleep, scheduler stalls, or a wall-clock jump.
+    fn clear_physical_state(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.pressed.clear();
+        state.buttons.clear();
+        state.consumed.clear();
+    }
+    pub fn recover_session_gap(&self) {
+        // Clear stale physical state before release can restore held modifiers.
+        self.clear_physical_state();
+        self.disconnect_controls();
+        self.cancel_peer_files(None);
+        self.note(
+            "Session timing gap; released input and cancelled transfers before reconnecting".into(),
+        );
+    }
+    fn start_session_monitor(self: &Arc<Self>) {
+        let service = self.clone();
+        tokio::spawn(async move {
+            let mut stop = service.stop.subscribe();
+            if *stop.borrow() {
+                return;
+            }
+            let mut tick = tokio::time::interval(Duration::from_millis(500));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! { biased; _=stop.changed()=>break, _=tick.tick()=>service.refresh_session() }
+            }
+        });
     }
     fn start_display_refresh(self: &Arc<Self>) {
         let service = self.clone();
@@ -728,6 +830,7 @@ impl Service {
         address: &str,
         purpose: &str,
     ) -> Result<(String, SecureReader, SecureWriter)> {
+        anyhow::ensure!(!*self.stop.borrow(), "Engine has stopped");
         let address: SocketAddr = address
             .parse()
             .context("Enter a local IP address and port, such as 192.168.1.20:24810")?;
@@ -848,10 +951,15 @@ impl Service {
     }
     pub async fn connect(self: &Arc<Self>, address: &str) -> Result<()> {
         let (id, reader, writer) = self.open(address, "control").await?;
+        anyhow::ensure!(!*self.stop.borrow(), "Engine has stopped");
         self.start_control(id, reader, writer, true);
         Ok(())
     }
     async fn reconnect(self: &Arc<Self>, id: &str, address: &str) -> Result<()> {
+        anyhow::ensure!(
+            self.session_available.load(Ordering::SeqCst),
+            "OS session unavailable"
+        );
         let address: SocketAddr = address.parse()?;
         anyhow::ensure!(local_ip(address.ip()), "Only local addresses are supported");
         let stream =
@@ -861,7 +969,12 @@ impl Service {
         self.start_control(id, reader, writer, true);
         Ok(())
     }
-    async fn accept(self: &Arc<Self>, stream: TcpStream, address: SocketAddr) -> Result<()> {
+    async fn accept(
+        self: &Arc<Self>,
+        stream: TcpStream,
+        address: SocketAddr,
+        handshake_permit: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<()> {
         let secure = SecureConnection::handshake(stream, &self.identity, false).await?;
         // Read purpose before replying; incoming source ports are ephemeral, so use
         // discovered/remembered listening address rather than source port for reconnect.
@@ -949,7 +1062,13 @@ impl Service {
         if !(approved && remote_approved) {
             return Ok(());
         }
+        // Pending bulk offers must not occupy handshake admission slots.
+        drop(handshake_permit);
         if purpose == "control" {
+            anyhow::ensure!(
+                self.session_available.load(Ordering::SeqCst),
+                "OS session unavailable"
+            );
             {
                 let mut c = self.config.lock().unwrap();
                 let mut next = c.clone();
@@ -963,6 +1082,10 @@ impl Service {
             }
             self.start_control(id, reader, writer, false);
         } else {
+            let _bulk = self
+                .incoming_bulk
+                .try_acquire()
+                .context("Receiver is busy with four bulk transfers; retry shortly")?;
             self.receive_blob(id, reader, writer).await?;
         }
         Ok(())
@@ -983,6 +1106,9 @@ impl Service {
         {
             let mut state = self.state.lock().unwrap();
             let mut channels = self.channels.lock().unwrap();
+            if *self.stop.borrow() {
+                return;
+            }
             if channels
                 .get(&id)
                 .is_some_and(|existing| existing.preferred || !preferred)
@@ -1019,13 +1145,10 @@ impl Service {
                 }
             });
             let mut stop = s.stop.subscribe();
-            if *stop.borrow() {
-                return;
-            }
             let start = Instant::now();
             let mut last_received = Instant::now();
             let mut heartbeat = tokio::time::interval(Duration::from_millis(300));
-            let result:Result<()>=async{loop{tokio::select!{
+            let result:Result<()>=async{if *stop.borrow(){return Ok(());}loop{tokio::select!{
                 biased;
                 _=stop.changed()=>break,
                 message=urgent.recv()=>match message{Some(m)=>{tokio::time::timeout(Duration::from_millis(750),writer.send(&m)).await.context("Emergency writer stalled")??;},None=>break},
@@ -1087,7 +1210,10 @@ impl Service {
     fn receive_control(&self, id: &str, message: Message) -> Result<()> {
         let allowed = {
             let c = self.routing.load();
-            c.peers.get(id).is_some_and(|p| *p) && !c.settings.paused
+            c.peers.get(id).is_some_and(|p| *p)
+                && !c.settings.paused
+                && self.session_available.load(Ordering::SeqCst)
+                && self.input_available.load(Ordering::SeqCst)
         };
         match message {
             Message::Enter { display_id, x, y } => {
@@ -1155,6 +1281,21 @@ impl Service {
         Ok(())
     }
     pub fn capture(&self, event: CapturedEvent) -> bool {
+        if matches!(event, CapturedEvent::Input(InputEvent::ReleaseAll)) {
+            let mut state = self.state.lock().unwrap();
+            state.pressed.clear();
+            state.buttons.clear();
+            state.consumed.clear();
+            drop(state);
+            self.release();
+            return false;
+        }
+        if !self.session_available.load(Ordering::SeqCst)
+            || !self.input_available.load(Ordering::SeqCst)
+            || *self.stop.borrow()
+        {
+            return false;
+        }
         let c = self.routing.load();
         let mut s = self.state.lock().unwrap();
         if let CapturedEvent::Input(InputEvent::Key { code, down }) = &event {
@@ -1654,13 +1795,17 @@ impl Service {
             let mut tick = tokio::time::interval(Duration::from_millis(700));
             loop {
                 tokio::select! {_=stop.changed()=>break,_=tick.tick()=>{
-                    let settings=s.config.lock().unwrap().settings.clone();if settings.paused||!(settings.clipboard_text||settings.clipboard_html||settings.clipboard_images){continue;}
+                    let settings=s.config.lock().unwrap().settings.clone();if settings.paused||!s.session_available.load(Ordering::SeqCst)||!(settings.clipboard_text||settings.clipboard_html||settings.clipboard_images){continue;}
+                    if s.clipboard_retry.swap(false, Ordering::SeqCst) { last_revision = None; }
                     let revision=s.backend.clipboard_revision().map(|n|(n,settings.clipboard_text,settings.clipboard_html,settings.clipboard_images));if revision.is_some()&&revision==last_revision{continue;}
                     let backend=s.backend.clone();let parts=match tokio::task::spawn_blocking(move||backend.read_clipboard()).await{Ok(Ok(p))=>filter_clipboard(p,&settings),_=>continue};last_revision=revision;if parts.is_empty(){continue;}
                     let Ok(data)=serde_json::to_vec(&parts)else{continue;};if data.len()>8*1024*1024{continue;}let hash=Sha256::digest(&data).to_vec();
-                    let changed={let mut st=s.state.lock().unwrap();if st.clipboard_hash==hash{false}else{st.clipboard_hash=hash;true}};if !changed{continue;}
+                    let changed={let mut st=s.state.lock().unwrap();if st.clipboard_hash==hash{false}else{st.clipboard_hash=hash.clone();true}};if !changed{continue;}
                     let peers={let c=s.config.lock().unwrap();let st=s.state.lock().unwrap();st.peers.iter().filter(|(id,p)|p.connected&&c.peers.get(*id).is_some_and(|p|p.allow_clipboard)).map(|(id,_)|id.clone()).collect::<Vec<_>>()};
-                    for id in peers{let s=s.clone();let data=data.clone();tokio::spawn(async move{if let Err(e)=s.send_clipboard(&id,data).await{s.note(format!("Clipboard transfer: {e}"));}});}
+                    for id in peers{let s=s.clone();let data=data.clone();let hash=hash.clone();tokio::spawn(async move{if let Err(e)=s.send_clipboard(&id,data).await{
+                        let mut state=s.state.lock().unwrap();if state.clipboard_hash==hash{state.clipboard_hash.clear();}drop(state);
+                        s.clipboard_retry.store(true,Ordering::SeqCst);s.note(format!("Clipboard transfer: {e}"));
+                    }});}
                 }}
             }
         });
