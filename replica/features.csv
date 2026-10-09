@@ -28,4 +28,4 @@ Consent by default,security,should,no,yes,Incoming files require approval unless
 Display lifecycle,layout,must,yes,partial,Two-second hotplug refresh; Mac UUID and Windows monitor interface paths; physical dock testing pending
 Single instance,desktop,should,yes,partial,Second launch focuses existing window; native verification pending
 Protected identities,security,must,yes,partial,Keychain migration verified on Mac; DPAPI cross-compiled; Windows runtime validation pending
-Clipboard privacy markers,security,must,yes,partial,Mac concealed/transient/generated and Windows history/cloud exclusions; unmarked secrets cannot be identified
+Clipboard privacy markers,security,must,no,partial,Reference-app support unverified; Mac concealed/transient/generated and Windows history/cloud exclusions; unmarked secrets cannot be identified

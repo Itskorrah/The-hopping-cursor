@@ -7,7 +7,8 @@ integrity, clipboard exchange, held-key handoff, emergency release, disconnect,
 revocation, quotas, and diagnostics exclusion. The suite currently contains
 42 Rust tests on macOS: 19 unit/security/native tests and 23 encrypted-network integration tests.
 Loopback services disable multicast; a separate opt-in two-service mDNS test
-checks untrusted discovery and rename refresh. Linux omits the two native pasteboard tests. Windows also includes a DPAPI
+checks untrusted discovery and rename refresh. Linux omits the two native pasteboard and two native-store migration tests
+(38 tests total). Windows also includes a DPAPI
 round-trip/tamper/non-overwrite test and an explicitly opted-in disposable-runner
 CF_HDROP test; it never replaces a developer clipboard during default tests.
 Additional regressions reject ciphertext tampering/replay, malformed/trailing

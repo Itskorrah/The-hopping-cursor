@@ -30,3 +30,20 @@ independent input/bulk connections; no fabricated performance numbers.
 
 No production-ready/better-than-original claim is made. Physical native input,
 native cross-screen OS file dragging, power/dimming, and signing remain gaps.
+
+## Local continuation — 2026-10-09
+
+Continued the imported history without rebuilding the product. Commits 1091ac5
+and a076002 add protected native identities, deterministic reconnect/discovery,
+stable display IDs and hotplug reconciliation, permission/session recovery,
+bounded bulk work and duplicate-ID consent isolation, explicit native file
+clipboard actions and source privacy-marker checks. Details and limitations
+are in docs/DEVELOPMENT_STATUS.md; historical counts above describe the cloud
+build and should not be read as the current suite.
+
+Current local checks: 42 Mac Rust tests, 10 browser tests, strict desktop/core
+Clippy and cross-target adapter checks, production frontend and unsigned native
+Mac debug bundle. A bounded AddressSanitizer parser campaign completed 1,770,886
+cases in 61 seconds. Native Mac file URLs/privacy flags use isolated pasteboards;
+actual Keychain migration preserved the prior public identity. Physical peers,
+Finder/Explorer workflows, native permissions and soak/performance remain gaps.
