@@ -31,6 +31,24 @@ jobs:
         with:
           name: browser-test-failures
           path: apps/desktop/test-results
+  protocol-fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - run: cargo run --locked --manifest-path fuzz/Cargo.toml --example seed
+      - run: cargo +nightly fuzz run control_frames -- -max_total_time=60 -rss_limit_mb=512 -max_len=65519 -print_final_stats=1
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: parser-fuzz-failures
+          path: fuzz/artifacts
+          if-no-files-found: ignore
   native:
     strategy:
       fail-fast: false
@@ -62,7 +80,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: cargo clippy --locked -p hop-core -p hopping-cursor --all-targets --target ${{ matrix.target }} -- -D warnings
-      - run: cargo test -p hop-core
+      - run: cargo test --locked -p hop-core
+      - name: Exercise file clipboard on disposable Windows runner
+        if: runner.os == 'Windows'
+        run: cargo test --locked -p hop-core windows_file_clipboard_round_trip -- --ignored
       - run: npm run tauri -w apps/desktop -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
       - name: Verify installer exists
         shell: bash
