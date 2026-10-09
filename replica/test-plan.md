@@ -24,10 +24,16 @@ Console errors and 5xx responses fail tests. Profiles and permission controls
 also receive direct regression coverage, along with monitor shortcut controls.
 All 10 browser tests passed locally, including axe checks across all five pages.
 
-Not run on real hardware: native hooks, UIPI, macOS permissions/taps, clipboard
+Not run across physical peers: native input, UIPI, clipboard
 HTML/PNG interoperability, mixed DPI, OS window drag/drop, tray behavior,
 sleep/wake/hotplug, long soak tests, end-to-end latency/throughput. See
 `docs/PLATFORM_TESTING.md` for actionable steps and pass criteria.
+
+The corrected local Mac bundle passes strict recursive signature validation.
+Native diagnostics confirm capture/injection/clipboard permission availability;
+Pause/Resume and Bring input here pass IPC smoke checks with zero paired peers.
+These do not establish physical cursor/key delivery or emergency-chord behavior.
+The package guard rejects the earlier invalid Mac DMG and detaches on failure.
 
 2026-10-09 regressions cover verified-address preservation, trusted-only
 reconnect candidates, simultaneous control connections followed by verified file

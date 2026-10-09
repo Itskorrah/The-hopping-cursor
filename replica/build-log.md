@@ -64,8 +64,16 @@ AppKit linkage and file-URL-only read options; both jobs now pass twenty isolate
 clipboard repetitions plus the full suite. BUG-007 records the evidence and
 remaining uncertainty about the original empty read. The latest local app
 opens with real local display data and zero paired/connected peers; native
-diagnostics and permission requests work. Accessibility / Input Monitoring
-approval remains pending; an earlier launch timeout resolved without an
-established cause. Run 37884039823 on a18c1d1 passed all five CI jobs, including
+diagnostics and permission requests work. Run 37884039823 on a18c1d1 passed all five CI jobs, including
 native Intel and ARM Mac suites and twenty isolated pasteboard repetitions per
 host, Windows native checks, and all three unsigned installer builds.
+
+Native permission setup then exposed invalid/unsealed Mac application signatures
+in both the local debug bundle and earlier installer packages (BUG-008). Explicit
+ad hoc signing corrects bundle integrity; the local app now reports capture,
+injection and clipboard access Available after both privacy entries were refreshed
+and Keychain access completed. Pause/Resume and Bring input here pass native IPC
+checks, and the existing public identity is preserved. Packaging now validates
+the app inside each finished DMG, with read-only mounting and cleanup on failure;
+the guard rejects the earlier invalid package. Developer ID/AuthentiCode signing,
+notarization and physical peer control still remain gaps.

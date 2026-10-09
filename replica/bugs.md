@@ -104,9 +104,12 @@
   bundle passes strict recursive verification, binds Info.plist/resources and
   uses `com.itskorrah.hoppingcursor` as its signing identifier. This does not
   establish a verified publisher, notarization, or stable grants across rebuilds.
-- Status: bundle correction verified locally; native permission recovery and
-  new installer signature verification are in progress. The corrected process
-  is waiting on Keychain access to its existing identity before opening.
+- Status: corrected local bundle verifies strictly. After refreshing both privacy
+  entries and completing Keychain access, native diagnostics confirm capture,
+  injection and clipboard access Available. Public identity is unchanged;
+  Pause/Resume and Bring input here pass native IPC smoke checks. CI now verifies
+  the actual app inside each finished DMG; its guard rejects the earlier invalid
+  package and detaches on failure. Physical peer control remains untested.
 - Guidance: [Tauri ad hoc signing](https://v2.tauri.app/distribute/sign/macos/#ad-hoc-signing)
   and [Apple on TCC signing identity](https://developer.apple.com/forums/thread/730043).
 

@@ -69,7 +69,9 @@ and connection addresses: review before sharing them.
 
 Native Windows and Intel/Apple Silicon Mac installers have built on GitHub's
 native runners, but still require actual OS/hardware testing.
-There has been no external cryptographic audit, signing, or notarization. A
+Mac bundles use ad hoc signatures for integrity, checked by strict bundle
+verification in CI. Developer ID / AuthentiCode signing, notarization and an
+external cryptographic audit remain unfinished. A
 short AddressSanitizer parser fuzz campaign passed 5,299,006 cases in 181 seconds;
 see [the harness and limits](../fuzz/README.md). It does not establish exhaustive
 protocol or native-adapter assurance. Use a private test LAN for initial validation. Report vulnerabilities

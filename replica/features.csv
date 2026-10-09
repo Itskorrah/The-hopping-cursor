@@ -21,7 +21,7 @@ Idle display dimming,power,should,yes,no,Hardware brightness adapter pending
 Lock wake session synchronization,power,should,yes,no,Protected-input and timing-gap safety recovery implemented; synchronized OS actions and full notifications pending
 Secure desktop control,input,could,yes,no,Windows service privilege work pending
 Commercial lifetime licensing,business,could,yes,skip,User-owned local alpha; commercial licensing deferred
-Signed installers,distribution,should,partial,no,Unsigned native CI packages; certificates not configured
+Signed installers,distribution,should,partial,no,Mac ad hoc bundle integrity; Developer ID/AuthentiCode certificates and notarization not configured
 Windows and macOS builds,distribution,must,yes,yes,Windows x64 NSIS and Intel/Apple Silicon DMG builds succeeded on native CI runners
 Privacy-preserving diagnostics,diagnostics,should,yes,yes,No keys or content in exports; real RTT labelled accurately
 Consent by default,security,should,no,yes,Incoming files require approval unless deliberately disabled

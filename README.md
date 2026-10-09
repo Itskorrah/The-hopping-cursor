@@ -15,7 +15,7 @@ A desktop application for sharing a mouse, keyboard, clipboard, and files betwee
 - Plain text, HTML, and PNG clipboard exchange on separate encrypted bulk connections, type controls, per-peer permissions, bounce suppression, and source clipboard privacy-marker checks.
 - Streamed file transfers, app-window drag/drop, recipient approval, progress, cancellation, SHA-256 verification, duplicate-name protection, quotas, and bounded concurrency. Explicit “Send copied files” and “Copy file for pasting” actions bridge native file lists without trusting remote paths.
 - Desktop pairing, draggable/keyboard-accessible layout editor, saved layout profiles, hotplug refresh, stable macOS UUID / Windows monitor interface identifiers, single-instance window reopening, computer management, transfers, preferences, diagnostics, and tray controls. Cursor lock and basic edge-blocking game mode.
-- Windows NSIS and Intel/Apple Silicon macOS DMG installers and build workflow in GitHub Actions. Installers are unsigned development builds; build success is not evidence of physical two-computer validation.
+- Windows NSIS and Intel/Apple Silicon macOS DMG installers and build workflow in GitHub Actions. Windows packages are unsigned; Mac bundles use ad hoc signatures without Developer ID or notarization. Build success is not evidence of physical two-computer validation.
 
 ## What's still missing
 
@@ -139,6 +139,10 @@ Strict Clippy passes locally, and the Windows/Intel adapters are cross-checked.
 The native debug app launches; Keychain migration preserved the existing public
 identity and removed the private key from JSON. This does not validate native
 input across physical computers. Native CI checks and packages all three targets.
+After correcting Mac bundle signing and refreshing privacy entries, native
+diagnostics show capture, injection and clipboard access Available. Pause/Resume
+and Bring input here pass local IPC checks with zero paired peers. Mac packages
+are now checked inside their finished disk images before CI uploads them.
 
 The loopback tests disable multicast so independent tests cannot discover one
 another. Run the dedicated real-mDNS check separately on an isolated private LAN:

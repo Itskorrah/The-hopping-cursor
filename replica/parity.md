@@ -30,7 +30,7 @@ Not shippable yet: 7 must-have features are not done.
 - [must] layout: Display lifecycle, partial  (Two-second hotplug refresh; Mac UUID and Windows monitor interface paths; physical dock testing pending)
 - [must] layout: Multiple display arrangement, partial  (Offset stacked and hidden topology tested; mixed DPI OS behavior pending)
 - [must] security: Protected identities, partial  (Mac Keychain migration and Windows CI DPAPI tamper/round-trip verified; physical account-recovery validation pending)
-- [should] distribution: Signed installers, no  (Unsigned native CI packages; certificates not configured)
+- [should] distribution: Signed installers, no  (Mac ad hoc bundle integrity; Developer ID/AuthentiCode certificates and notarization not configured)
 - [should] power: Idle display dimming, no  (Hardware brightness adapter pending)
 - [should] power: Lock wake session synchronization, no  (Protected-input and timing-gap safety recovery implemented; synchronized OS actions and full notifications pending)
 - [should] clipboard: Clipboard images and formatting, partial  (PNG/HTML adapters compile; cross-app OS tests pending)

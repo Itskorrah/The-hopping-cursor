@@ -50,6 +50,12 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
   regression. Campaigns now use a bounded 2048 MiB budget with sanitizer
   protections unchanged; see [fuzz evidence](../fuzz/README.md).
 - Fix current stable Rust's macOS clipboard lint; check native Clippy in CI.
+- Configure explicit Mac ad hoc bundle signing and strict recursive signature
+  validation in CI. An enabled Accessibility switch did not grant trust to the
+  earlier invalid bundle; app-specific TCC logs showed a code-requirement mismatch.
+  The corrected local bundle now seals its resources/Info.plist and passes
+  validation. Ad hoc signing does not provide a verified publisher or dependable
+  permission continuity across rebuilds; Developer ID signing remains required.
 
 ## Verified locally
 
@@ -69,12 +75,15 @@ keys, encrypted transport, separate bulk traffic, and emergency release.
   five pages and a 390px viewport. These exercise the labelled browser preview.
 - Native Mac debug bundle builds and launches with real local display data.
   Actual Keychain migration preserved the preexisting public identity and removed
-  the private key from the real JSON config. The updated bundle opens with one
-  real local display and zero paired/connected peers. Native diagnostics and the
-  permission-request action work; diagnostics still report missing Accessibility
-  / Input Monitoring permission. An earlier launch timeout resolved on a later
-  native window check; its cause was not established. Human approval and a fresh
-  permission check remain pending. Cross-computer input was not tested.
+  the private key from the real JSON config. An enabled Accessibility entry still
+  left injection unavailable until the signing defect in BUG-008 was corrected.
+  The corrected ad hoc bundle passes strict signature validation. After refreshing
+  both privacy entries and completing Keychain access, it opens with one real
+  display and zero paired/connected peers. Diagnostics confirm capture, injection
+  and clipboard access are Available. Native Pause → Resume restores Workspace
+  ready; Bring input here confirms input returned locally. The public identity
+  is unchanged. These verify native startup, permissions and IPC controls;
+  cross-computer input and physical emergency-chord behavior were not tested.
 
 ## Native CI evidence
 
@@ -102,6 +111,15 @@ isolated pasteboard repetitions passed on both actual ARM and Intel Mac hosts.
 Windows native tests and CF_HDROP checks passed; all three installer targets built.
 This closes the earlier Intel runtime coverage gap without establishing physical
 input, Finder/Explorer paste acceptance, or multi-computer behavior.
+
+Strict signature inspection later exposed defects in those earlier Mac packages;
+they are superseded. Explicit ad hoc signing now seals Mac bundles. The workflow
+mounts each finished DMG read-only, verifies its packaged app recursively and
+checks its identifier/version before uploading. The guard rejects the earlier
+invalid ARM package and detaches the disk image on failure. The initial guard
+attempt targeted a staging app that Tauri deletes after DMG-only packaging;
+verification now inspects the finished package. See current Actions results for
+the latest installer checkpoint.
 
 ## Still required
 
