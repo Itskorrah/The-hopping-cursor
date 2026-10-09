@@ -152,3 +152,27 @@ is balanced on release; native aggregate suppression diagnostics contain no keys
 clipboard data or file contents. Hosted Windows installer generation is currently
 blocked before jobs start by GitHub's account payment/spending-limit restriction;
 no billing configuration or financial commitment has been changed.
+
+The local 0.1.1 Mac app is now installed in `~/Applications/The Hopping Cursor.app`
+and signed with an existing Apple Development identity via an ignored local
+override. Strict signature verification passes. After refreshing only this
+app's existing privacy grants, Diagnostics shows capture, injection and clipboard
+access Available, one paired/connected PC and the unchanged public identity.
+The live native tap is enabled at the active session location with filtering
+options 0. Resume, Bring input here and Pause pass native IPC checks. The saved
+Mac layout now places the PC primary adjacent to the Mac, followed by its
+secondary monitor. Sharing is left paused for the two-updated-app trial.
+
+[Hosted run 37895937871](https://github.com/Itskorrah/The-hopping-cursor/actions/runs/37895937871)
+again finished all five jobs with zero executed steps because of the account
+restriction. With explicit owner approval for Microsoft's build-tool licence,
+a local Tauri/cargo-xwin MSVC/NSIS build produced the
+[Windows 0.1.1 test release](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.1-test.1)
+from source commit `56cdf1e`. Both executable version resources are 0.1.1.0;
+the app is AMD64. The installer passes NSIS archive integrity checks. Extracted
+application bytes match the build allowing only the documented `UNK`→`NSS`
+bundle marker, and uploaded ZIP hashes are checked. The package includes license,
+notices, hashes and build provenance. Missing CRT PDB warnings affect debugging
+symbols; the compile/link/package completed. Windows native runtime checks and
+physical input acceptance have not run for this cross-build. It is unsigned;
+production distribution remains unfinished. See [build steps](BUILDING.md).

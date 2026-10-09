@@ -60,6 +60,9 @@ Build installers locally:
 npm run desktop:build
 ```
 
+For platform prerequisites, Windows NSIS builds and a local fallback when hosted
+runners are unavailable, see [docs/BUILDING.md](docs/BUILDING.md).
+
 For a local Mac debug bundle, run `npm run tauri -w apps/desktop -- build --debug --bundles app`.
 Keep signing enabled. Verify the bundle before requesting permissions:
 
@@ -179,6 +182,13 @@ For an existing arrangement, click **Use OS display order**, inspect the
 **Primary** label, then save. Configure the same physical layout on both
 computers: Mac on the left, Windows primary in the middle, Windows secondary
 on the right. Layouts are saved independently; saving on one computer does not
-modify the other. A new Windows installer depends on a successful native build;
-GitHub currently blocks hosted jobs with an account billing/spending-limit error.
-The installed app itself does not require a GitHub subscription.
+modify the other.
+
+The [Windows 0.1.1 test download](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.1-test.1)
+is available from the repair branch. It was cross-built locally on macOS because
+GitHub blocked hosted jobs before they started. Archive integrity, packaged app
+bytes (allowing only Tauri's NSIS bundle marker), x64 architecture and 0.1.1
+version resources pass verification. It is unsigned and still needs Windows
+installation/native input testing; the repair has not been merged into main.
+The ZIP includes update instructions, license, notices and build metadata.
+No paid runners or billing changes were used.

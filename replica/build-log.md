@@ -84,3 +84,12 @@ notarization and physical peer control still remain gaps.
   injection source; label primary displays and add OS-order repair. 47 Rust /
   11 browser checks pass locally, cross-target strict Clippy passes. Physical
   duplicate-click validation and updated Windows installer remain pending.
+
+- 2026-10-09 / 0.1.1 delivery: install the locally Apple Development-signed Mac
+  app in the user's Applications folder, refresh its existing grants and verify
+  all three native permission checks plus recovery IPC; public identity and PC
+  pairing remain intact. Hosted run 37895937871 is blocked with zero steps.
+  With owner-approved Microsoft SDK terms, cross-build the Windows MSVC/NSIS
+  package locally, check archive/architecture/version and exact bundled bytes
+  accounting only for Tauri's NSIS marker, and publish the private test release
+  v0.1.1-test.1. Physical duplicate-input and two-way Windows acceptance remain open.

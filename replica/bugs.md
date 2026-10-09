@@ -157,7 +157,8 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
   cross-computer edges when local input owns the cursor. Both computers need
   matching saved arrangements for bidirectional routing.
 - Status: regression and encrypted Windows-primary-to-Mac keyboard/button
-  routing tests pass; physical Windows retest awaits the updated installer.
+  routing tests pass. The updated cross-built 0.1.1 Windows test installer is
+  available; actual installation and physical Windows retest remain pending.
 
 ### BUG-012: Crossing two remote monitors drops a held drag/key lease
 

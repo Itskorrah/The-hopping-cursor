@@ -71,6 +71,12 @@ use OS display order to repair reversed enumeration, then arrange Mac → Window
 primary → Windows secondary and save. Confirm the Primary label matches the
 middle monitor. Layouts are independent. Open harmless blank editors on both.
 
+The [0.1.1 Windows test ZIP](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.1-test.1)
+contains the new installer. Fully quit the previous PC app from its tray menu,
+install, reopen and confirm v0.1.1. This package was cross-built on macOS and
+has not yet passed actual Windows installation/runtime acceptance. The locally
+installed Mac app is already 0.1.1; its permission/IPC checks pass.
+
 - Mac right edge enters the middle PC display; continue to the right PC display.
 - While controlling the PC, Mac pointer stays hidden/parked and clicks, scroll,
   typing and shortcuts do not affect Mac applications. Check the aggregate
