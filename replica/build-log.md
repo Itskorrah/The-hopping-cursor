@@ -77,3 +77,10 @@ checks, and the existing public identity is preserved. Packaging now validates
 the app inside each finished DMG, with read-only mounting and cleanup on failure;
 the guard rejects the earlier invalid package. Developer ID/AuthentiCode signing,
 notarization and physical peer control still remain gaps.
+
+- 2026-10-09 / 0.1.1: reproduce monitor enumeration order, Windows local
+  wraparound and same-peer held-drag loss with failing tests; correct routing,
+  add native source cursor lifecycle/unmapped-key suppression and private Mac
+  injection source; label primary displays and add OS-order repair. 47 Rust /
+  11 browser checks pass locally, cross-target strict Clippy passes. Physical
+  duplicate-click validation and updated Windows installer remain pending.

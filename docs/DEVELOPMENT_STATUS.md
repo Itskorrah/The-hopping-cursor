@@ -132,3 +132,23 @@ layout coverage, and privileged Windows secure desktop support remain unfinished
 Signing/notarization, verified signed updates, measured latency/throughput and
 independent security review require additional infrastructure or external work.
 Do not infer those capabilities from passing protocol or browser tests.
+
+## 0.1.1 three-screen input repair — 2026-10-09
+
+The first physical Windows/Mac report reproduced wrong monitor selection,
+Windows local wraparound and duplicate source interaction. New regressions
+confirm enumeration-order placement, local-to-local warping and lost held input
+between remote monitors. These are corrected in source; 47 Mac Rust tests,
+11 browser tests, frontend build and strict core/CLI Clippy for Windows and both
+Mac targets pass locally. Native Mac filter tests construct isolated events
+without injecting them into the user's desktop. Mapping, cursor suppression
+and lease changes need a physical retest of both updated apps. BUG-010 remains
+open for that confirmation; no new completed physical acceptance claim is made.
+
+Version 0.1.1 retains pairing identity/configuration and protocol version 1.
+Saved arrangements are preserved and repaired explicitly using OS display order;
+configure the same arrangement on each computer. Mac source cursor suppression
+is balanced on release; native aggregate suppression diagnostics contain no keys,
+clipboard data or file contents. Hosted Windows installer generation is currently
+blocked before jobs start by GitHub's account payment/spending-limit restriction;
+no billing configuration or financial commitment has been changed.

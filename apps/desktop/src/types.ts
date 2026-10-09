@@ -85,4 +85,5 @@ export interface Snapshot {
   diagnostics: string[];
   version: string;
   session_available: boolean;
+  suppressed_events?: number | null;
 }

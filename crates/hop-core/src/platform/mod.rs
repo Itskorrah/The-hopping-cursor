@@ -32,6 +32,13 @@ pub trait Platform: Send + Sync {
     }
     fn start_capture(&self, callback: CaptureCallback) -> Result<()>;
     fn stop_capture(&self);
+    /// Balance source-cursor suppression on all ownership/recovery paths.
+    fn set_forwarding(&self, _forwarding: bool) -> Result<()> {
+        Ok(())
+    }
+    fn suppressed_events(&self) -> Option<u64> {
+        None
+    }
     fn inject(&self, event: &InputEvent) -> Result<()>;
     fn read_clipboard(&self) -> Result<Vec<ClipboardPart>>;
     fn clipboard_revision(&self) -> Option<u64> {
@@ -64,6 +71,7 @@ pub fn native() -> Arc<dyn Platform> {
 /// Linux input support. An in-memory clipboard enables deterministic integration tests.
 #[derive(Default)]
 pub struct Headless {
+    pub forwarding: std::sync::atomic::AtomicBool,
     pub session_blocked: std::sync::atomic::AtomicBool,
     pub events: std::sync::Mutex<Vec<InputEvent>>,
     pub clipboard: std::sync::Mutex<Vec<ClipboardPart>>,
@@ -71,6 +79,11 @@ pub struct Headless {
     pub display_override: std::sync::Mutex<Option<Vec<Display>>>,
 }
 impl Platform for Headless {
+    fn set_forwarding(&self, forwarding: bool) -> Result<()> {
+        self.forwarding
+            .store(forwarding, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
     fn session_available(&self) -> bool {
         !self
             .session_blocked

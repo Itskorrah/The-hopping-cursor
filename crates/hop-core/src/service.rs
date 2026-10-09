@@ -310,6 +310,7 @@ impl Service {
             listening_port: self.listening_port,
             diagnostics: s.diagnostics.clone(),
             version: env!("CARGO_PKG_VERSION").into(),
+            suppressed_events: self.backend.suppressed_events(),
             session_available: self.session_available.load(Ordering::SeqCst),
         }
     }
@@ -526,6 +527,10 @@ impl Service {
             return_x: return_position.0,
             return_y: return_position.1,
         });
+        if let Err(e) = self.sync_forwarding() {
+            self.release();
+            return Err(e.context("Cannot suppress local input"));
+        }
         if !self.send(
             device_id,
             Message::Enter {
@@ -639,6 +644,7 @@ impl Service {
             (s.active.take(), s.inbound.take())
         };
         let active_was_remote = active.is_some();
+        let _ = self.sync_forwarding();
         if let Some(a) = active {
             self.send(&a.peer, Message::Leave);
             let _ = self.backend.inject(&InputEvent::Move {
@@ -659,6 +665,12 @@ impl Service {
         self.disconnect_controls();
         self.backend.stop_capture();
         self.decisions.lock().unwrap().clear();
+    }
+    fn sync_forwarding(&self) -> Result<()> {
+        // Serialize cursor visibility with ownership. A release racing a hop
+        // must not leave the source hidden after its active lease was cleared.
+        let state = self.state.lock().unwrap();
+        self.backend.set_forwarding(state.active.is_some())
     }
     fn disconnect_controls(&self) {
         self.release();
@@ -1229,8 +1241,6 @@ impl Service {
                 let same_owner = self.state.lock().unwrap().inbound.as_deref() == Some(id);
                 if !same_owner {
                     self.release();
-                } else {
-                    let _ = self.backend.inject(&InputEvent::ReleaseAll);
                 }
                 self.state.lock().unwrap().inbound = Some(id.into());
                 self.backend.inject(&InputEvent::Move { x, y })?;
@@ -1269,6 +1279,7 @@ impl Service {
                     let _ = self.backend.inject(&InputEvent::ReleaseAll);
                 }
                 if let Some(a) = active {
+                    let _ = self.sync_forwarding();
                     let _ = self.backend.inject(&InputEvent::Move {
                         x: a.return_x,
                         y: a.return_y,
@@ -1415,7 +1426,9 @@ impl Service {
                 let next = if c.settings.cursor_locked || c.settings.game_mode {
                     None
                 } else {
-                    topology::adjacent(&c.layout, &from, wx, wy, motion.0, motion.1).cloned()
+                    topology::adjacent(&c.layout, &from, wx, wy, motion.0, motion.1)
+                        .filter(|next| s.active.is_some() || next.device_id != s.local.id)
+                        .cloned()
                 };
                 if let Some(next) = next {
                     let online = next.device_id == s.local.id
@@ -1453,6 +1466,7 @@ impl Service {
                                 s.edge = None;
                                 if next.device_id == s.local.id {
                                     drop(s);
+                                    let _ = self.sync_forwarding();
                                     if let Some(a) = old {
                                         self.send(&a.peer, Message::Leave);
                                     }
@@ -1481,8 +1495,11 @@ impl Service {
                                     local_display.bounds.y + local_display.bounds.height / 2.;
                                 drop(s);
                                 let old_was_local = old.is_none();
+                                let same_peer = old.as_ref().is_some_and(|a| a.peer == peer);
                                 if let Some(a) = old {
-                                    self.send(&a.peer, Message::Leave);
+                                    if !same_peer {
+                                        self.send(&a.peer, Message::Leave);
+                                    }
                                 }
                                 if old_was_local {
                                     self.release_physical_on_source();
@@ -1491,6 +1508,11 @@ impl Service {
                                     x: park_x,
                                     y: park_y,
                                 });
+                                if let Err(e) = self.sync_forwarding() {
+                                    self.note(format!("Cannot suppress local input: {e}"));
+                                    self.release();
+                                    return false;
+                                }
                                 if !self.send(
                                     &peer,
                                     Message::Enter {
@@ -1502,7 +1524,9 @@ impl Service {
                                     self.release();
                                     return false;
                                 }
-                                self.forward_physical_to(&peer);
+                                if !same_peer {
+                                    self.forward_physical_to(&peer);
+                                }
                                 return true;
                             }
                         }
@@ -1556,6 +1580,7 @@ impl Service {
                     false
                 }
             }
+            CapturedEvent::Unsupported => s.active.is_some(),
         }
     }
     fn physical(&self) -> (Vec<u16>, Vec<u8>) {

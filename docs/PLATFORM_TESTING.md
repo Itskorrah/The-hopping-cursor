@@ -63,3 +63,25 @@ Still out of scope: UAC/Windows login/secure desktop input, native Finder/Explor
 file dragging across monitor edges, automatic file-clipboard synchronization, dimming, session
 lock/wake synchronization, relative/raw gaming input, and system-wide media keys. Explicit file-list clipboard
 bridging is implemented but still needs the cross-application checks above.
+
+## Three-screen regression retest (0.1.1)
+
+Update both computers, keeping their identities/settings. On both workspaces,
+use OS display order to repair reversed enumeration, then arrange Mac → Windows
+primary → Windows secondary and save. Confirm the Primary label matches the
+middle monitor. Layouts are independent. Open harmless blank editors on both.
+
+- Mac right edge enters the middle PC display; continue to the right PC display.
+- While controlling the PC, Mac pointer stays hidden/parked and clicks, scroll,
+  typing and shortcuts do not affect Mac applications. Check the aggregate
+  locally suppressed-event count increases without recording content.
+- Windows primary left edge enters the Mac; remote clicks and keys affect the
+  Mac alone. Physical movement between the PC's own monitors does not wrap.
+- Hold a harmless drag or modifier across both PC monitors; it must remain held
+  until physically released. Test both screen-edge return and Ctrl+Alt+Esc.
+- Pause, disconnect, revoke permissions and quit: source cursor must become
+  visible again and held remote input must release.
+
+The tests model portable routing and directly exercise the Mac filter using
+constructed events that are never posted. They do not establish physical hook,
+background cursor visibility or foreground-application suppression behavior.

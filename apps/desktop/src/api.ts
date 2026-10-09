@@ -99,7 +99,7 @@ const sample: Snapshot = {
   diagnostics: [
     "Interface preview loaded. No native input, network, or file sharing is running.",
   ],
-  version: "0.1.0",
+  version: "0.1.1",
   session_available: true,
 };
 let preview: Snapshot;

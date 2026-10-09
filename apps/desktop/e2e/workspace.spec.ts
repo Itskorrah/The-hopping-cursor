@@ -42,6 +42,58 @@ test("sharing preferences persist across reload", async ({ page }) => {
   await page.getByRole("button", { name: "Preferences", exact: true }).click();
   await expect(toggle).not.toBeChecked();
 });
+
+test("two PC monitors have distinct primary labels and OS order can repair a reversed layout", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await page.evaluate(() => {
+    const key = "hopping-cursor-interface-preview-v1";
+    const state = JSON.parse(localStorage.getItem(key)!);
+    const pc = state.peers.find(
+      (p: { device: { id: string } }) => p.device.id === "pc-preview",
+    ).device;
+    const primary = pc.displays[0];
+    const right = {
+      ...primary,
+      id: "right",
+      primary: false,
+      bounds: { ...primary.bounds, x: 1920 },
+    };
+    pc.displays = [right, primary];
+    state.layout.find(
+      (d: { device_id: string }) => d.device_id === pc.id,
+    ).rect.x = 3840;
+    state.layout.push({
+      device_id: pc.id,
+      display_id: right.id,
+      rect: { x: 1920, y: 0, width: 1920, height: 1080 },
+      hidden: false,
+    });
+    localStorage.setItem(key, JSON.stringify(state));
+  });
+  await page.reload();
+  const primary = page.getByRole("button", {
+    name: "Arrange Design PC display Display 1 · Primary",
+    exact: true,
+  });
+  const right = page.getByRole("button", {
+    name: "Arrange Design PC display Display 2",
+    exact: true,
+  });
+  await expect(primary).toBeVisible();
+  await expect(right).toBeVisible();
+  await page
+    .getByRole("button", { name: "Use OS display order", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Save layout", exact: true }).click();
+  await expect(page.getByText("Display arrangement saved")).toBeVisible();
+  await page.reload();
+  const primaryBox = await primary.boundingBox(),
+    rightBox = await right.boundingBox();
+  expect(primaryBox!.x).toBeLessThan(rightBox!.x);
+});
 test("pairing requires an explicit fingerprint comparison", async ({
   page,
 }) => {

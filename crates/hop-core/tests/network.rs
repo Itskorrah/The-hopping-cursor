@@ -49,6 +49,9 @@ async fn wait(mut check: impl FnMut() -> bool) {
     }
 }
 async fn pair(auto_accept: bool) -> Pair {
+    pair_with_displays(auto_accept, None).await
+}
+async fn pair_with_displays(auto_accept: bool, displays: Option<Vec<hop_core::Display>>) -> Pair {
     let da = tempfile::tempdir().unwrap();
     let db = tempfile::tempdir().unwrap();
     for d in [&da, &db] {
@@ -60,6 +63,7 @@ async fn pair(auto_accept: bool) -> Pair {
     }
     let pa = Arc::new(Headless::default());
     let pb = Arc::new(Headless::default());
+    *pb.display_override.lock().unwrap() = displays;
     let a = start_test(da.path().to_owned(), Some(0), pa.clone())
         .await
         .unwrap();
@@ -110,6 +114,261 @@ async fn pair(auto_accept: bool) -> Pair {
         _a: da,
         _b: db,
     }
+}
+
+fn pc_displays() -> Vec<hop_core::Display> {
+    vec![
+        hop_core::Display {
+            id: "right".into(),
+            name: "Right".into(),
+            bounds: Rect {
+                x: 1920.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            scale: 1.,
+            primary: false,
+        },
+        hop_core::Display {
+            id: "primary".into(),
+            name: "Middle".into(),
+            bounds: Rect {
+                x: 0.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            scale: 1.,
+            primary: true,
+        },
+    ]
+}
+
+#[tokio::test]
+async fn pc_primary_left_edge_routes_to_mac_with_exclusive_keyboard_and_buttons() {
+    let p = pair_with_displays(true, Some(pc_displays())).await;
+    let a = p.a.snapshot().local;
+    let b = p.b.snapshot().local;
+    let layout = vec![
+        LayoutDisplay {
+            device_id: a.id.clone(),
+            display_id: a.displays[0].id.clone(),
+            rect: Rect {
+                x: 0.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            hidden: false,
+        },
+        LayoutDisplay {
+            device_id: b.id.clone(),
+            display_id: "primary".into(),
+            rect: Rect {
+                x: 1920.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            hidden: false,
+        },
+        LayoutDisplay {
+            device_id: b.id.clone(),
+            display_id: "right".into(),
+            rect: Rect {
+                x: 3840.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            hidden: false,
+        },
+    ];
+    p.a.set_layout(layout.clone()).unwrap();
+    p.b.set_layout(layout).unwrap();
+    assert!(p.b.capture(CapturedEvent::Move {
+        x: 0.,
+        y: 500.,
+        dx: -5.,
+        dy: 0.
+    }));
+    for event in [
+        InputEvent::Button {
+            button: 1,
+            down: true,
+        },
+        InputEvent::Button {
+            button: 1,
+            down: false,
+        },
+        InputEvent::Key {
+            code: 4,
+            down: true,
+        },
+        InputEvent::Key {
+            code: 4,
+            down: false,
+        },
+    ] {
+        assert!(p.b.capture(CapturedEvent::Input(event)));
+    }
+    wait(|| {
+        p.pa.events.lock().unwrap().contains(&InputEvent::Key {
+            code: 4,
+            down: false,
+        })
+    })
+    .await;
+    assert_eq!(p.b.snapshot().active_device, a.id);
+    assert!(p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(!p.pb.events.lock().unwrap().contains(&InputEvent::Button {
+        button: 1,
+        down: true
+    }));
+    assert!(!p.pb.events.lock().unwrap().contains(&InputEvent::Key {
+        code: 4,
+        down: true
+    }));
+    p.b.release();
+    wait(|| {
+        p.pa.events
+            .lock()
+            .unwrap()
+            .contains(&InputEvent::ReleaseAll)
+    })
+    .await;
+    assert!(!p.pb.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn native_local_monitors_are_not_warped_by_a_reordered_workspace() {
+    let p = pair_with_displays(true, Some(pc_displays())).await;
+    let id = p.b.snapshot().local.id;
+    p.b.set_layout(vec![
+        LayoutDisplay {
+            device_id: id.clone(),
+            display_id: "right".into(),
+            rect: Rect {
+                x: 0.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            hidden: false,
+        },
+        LayoutDisplay {
+            device_id: id,
+            display_id: "primary".into(),
+            rect: Rect {
+                x: 1920.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            hidden: false,
+        },
+    ])
+    .unwrap();
+    p.pb.events.lock().unwrap().clear();
+    assert!(!p.b.capture(CapturedEvent::Move {
+        x: 0.,
+        y: 500.,
+        dx: -5.,
+        dy: 0.
+    }));
+    assert!(
+        p.pb.events.lock().unwrap().is_empty(),
+        "Windows must retain its own native monitor transitions"
+    );
+}
+
+#[tokio::test]
+async fn remote_drag_across_two_monitors_keeps_the_same_input_lease() {
+    let p = pair_with_displays(true, Some(pc_displays())).await;
+    let a = p.a.snapshot().local;
+    let b = p.b.snapshot().local;
+    p.a.set_layout(vec![
+        LayoutDisplay {
+            device_id: a.id.clone(),
+            display_id: a.displays[0].id.clone(),
+            rect: Rect {
+                x: 0.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            hidden: false,
+        },
+        LayoutDisplay {
+            device_id: b.id.clone(),
+            display_id: "primary".into(),
+            rect: Rect {
+                x: 1920.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            hidden: false,
+        },
+        LayoutDisplay {
+            device_id: b.id.clone(),
+            display_id: "right".into(),
+            rect: Rect {
+                x: 3840.,
+                y: 0.,
+                width: 1920.,
+                height: 1080.,
+            },
+            hidden: false,
+        },
+    ])
+    .unwrap();
+    p.a.jump_to_display(&b.id, "primary").unwrap();
+    assert!(p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(p.a.capture(CapturedEvent::Unsupported));
+    assert!(p.a.capture(CapturedEvent::Input(InputEvent::Button {
+        button: 0,
+        down: true
+    })));
+    wait(|| {
+        p.pb.events.lock().unwrap().contains(&InputEvent::Button {
+            button: 0,
+            down: true,
+        })
+    })
+    .await;
+    p.pb.events.lock().unwrap().clear();
+    assert!(p.a.capture(CapturedEvent::Move {
+        x: 960.,
+        y: 540.,
+        dx: 1000.,
+        dy: 0.
+    }));
+    wait(|| {
+        p.pb.events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, InputEvent::Move { x, .. } if *x > 1920.))
+    })
+    .await;
+    let events = p.pb.events.lock().unwrap().clone();
+    assert!(
+        !events.contains(&InputEvent::ReleaseAll),
+        "Crossing monitors on the same PC must preserve a held drag"
+    );
+    assert!(
+        !events.contains(&InputEvent::Button {
+            button: 0,
+            down: true
+        }),
+        "A monitor change must not synthesize a second mouse-down"
+    );
+    assert_eq!(p.a.snapshot().active_device, b.id);
+    p.a.release();
+    assert!(!p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(!p.a.capture(CapturedEvent::Unsupported));
 }
 
 #[tokio::test]
@@ -218,6 +477,7 @@ async fn held_keys_handoff_and_disconnect_return_input() {
     assert_eq!(p.a.snapshot().active_device, b.local.id);
     p.b.shutdown();
     wait(|| p.a.snapshot().active_device == a.local.id).await;
+    assert!(!p.pa.forwarding.load(std::sync::atomic::Ordering::SeqCst));
     assert!(p.pa.events.lock().unwrap().contains(&InputEvent::Key {
         code: 224,
         down: true

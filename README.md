@@ -111,7 +111,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-The current suite has **42 Rust tests on macOS and 10 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
+The current suite has **47 Rust tests on macOS and 11 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
 
 Dependency audit results and remaining warnings are recorded in [docs/SECURITY.md](docs/SECURITY.md). The prioritized path from this alpha to a release is in [docs/ROADMAP.md](docs/ROADMAP.md); the research feature matrix is in [replica/features.csv](replica/features.csv).
 
@@ -157,3 +157,28 @@ A bounded AddressSanitizer parser fuzz run completed 5,299,006 cases in 181 seco
 
 The CLI supports `daemon --no-discovery` for manual/remembered connections.
 See [docs/DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md) for detailed evidence.
+
+## Input-routing update (0.1.1, 2026-10-09)
+
+The three-screen Mac → Windows primary → Windows secondary hardware trial
+exposed incorrect monitor order, local Windows wraparound, and duplicate Mac
+input. Version 0.1.1 preserves native monitor geometry for newly discovered
+computers, leaves local monitor movement to the OS, and keeps held input leased
+when crossing two screens on the same remote computer. Mac capture uses an
+active session filter, a marked private injection source and a hidden, parked
+source cursor; Windows source cursors are restored on release. Unmapped keys
+are suppressed on the source while controlling a peer. Diagnostics expose
+only an aggregate suppressed-event count, never key or event contents.
+
+47 Rust tests and 11 browser tests pass locally; strict checks pass for Windows
+and both Mac architectures. These fixes still require a physical retest on both
+updated apps. Do not use the 0.1.0 installer to evaluate Windows-side fixes.
+Existing pairing identities and saved layouts are retained.
+
+For an existing arrangement, click **Use OS display order**, inspect the
+**Primary** label, then save. Configure the same physical layout on both
+computers: Mac on the left, Windows primary in the middle, Windows secondary
+on the right. Layouts are saved independently; saving on one computer does not
+modify the other. A new Windows installer depends on a successful native build;
+GitHub currently blocks hosted jobs with an account billing/spending-limit error.
+The installed app itself does not require a GitHub subscription.

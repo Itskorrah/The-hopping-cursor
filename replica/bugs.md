@@ -118,3 +118,52 @@
 OS permissions, hotplug/dock identities, native input, pasteboards, secure desktop,
 long-duration reliability and latency. These are verification gaps, not invented
 bug reproductions. See docs/PLATFORM_TESTING.md.
+
+### BUG-009: First remote monitor follows enumeration order instead of physical geometry
+
+- Severity: S2; flow F02; reported on the physical three-screen Mac/Windows setup.
+- Expected: the Mac's right edge enters the Windows primary display in the middle.
+- Actual: it enters the far-right display; both PC tiles had identical labels.
+- Reproduction: reversed native monitor enumeration puts the primary second;
+  the new topology regression fails against 0.1.0.
+- Change: preserve native bounds for new monitor groups, retain existing user
+  placements, label display order and primary status, and provide an explicit
+  OS-order repair action for existing layouts.
+- Status: automated regressions pass; exact physical arrangement requires retest.
+
+### BUG-010: Mac input remains visible/active while controlling Windows
+
+- Severity: S1; flow F02; user reports movement and clicks affecting both computers.
+- Findings: the native tap is active, but source cursor state was not managed.
+  Unmapped keys also bypassed local suppression. The exact cause of the reported
+  mapped-click duplication has not been isolated in a new physical trial.
+- Change: use an active Mac session filter, private marked injection source with
+  local-event suppression disabled, balanced cursor hiding and event-free parking;
+  suppress unsupported source keys while a remote lease is active. Restore cursor
+  state on release, leave, pause, session failure, disconnect and capture shutdown.
+  Windows restores its previous shared cursor shape without changing cursor themes.
+- Evidence: native direct-callback tests discard right clicks and unmapped keys
+  without posting test events into the session; injected events bypass capture.
+  Encrypted integration checks verify callback consumption and recovery state.
+- Status: physical duplicate-click/cursor verification remains open. Sharing
+  is paused until the updated apps and arrangements are ready for a controlled retest.
+
+### BUG-011: Windows left edge wraps to its other local monitor
+
+- Severity: S2; flow F02; user reports failure to enter the Mac from Windows.
+- Reproduction: swapping local monitor placements makes the engine consume the
+  primary display's native left edge and warp to the local secondary display.
+- Change: leave physical local-to-local motion to the native OS. Route only
+  cross-computer edges when local input owns the cursor. Both computers need
+  matching saved arrangements for bidirectional routing.
+- Status: regression and encrypted Windows-primary-to-Mac keyboard/button
+  routing tests pass; physical Windows retest awaits the updated installer.
+
+### BUG-012: Crossing two remote monitors drops a held drag/key lease
+
+- Severity: S2; flow F02; found by regression testing the two-monitor PC.
+- Reproduction: a held button is released/re-pressed when switching displays
+  belonging to the same remote computer.
+- Cause: sending Leave and Enter on the same peer plus unconditional ReleaseAll.
+- Change: keep the same peer lease and held state across monitor transitions.
+- Status: failing-before/passing-after encrypted regression retained; hardware retest pending.

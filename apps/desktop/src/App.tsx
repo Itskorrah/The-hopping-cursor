@@ -402,7 +402,11 @@ export default function App() {
             </div>
           )}
           {native && !data.session_available && (
-            <div className="notice" role="status">Sharing is suspended while the OS input session is protected. Return to the normal desktop or leave secure keyboard entry to resume.</div>
+            <div className="notice" role="status">
+              Sharing is suspended while the OS input session is protected.
+              Return to the normal desktop or leave secure keyboard entry to
+              resume.
+            </div>
           )}
           {native &&
             (!data.permissions.capture || !data.permissions.injection) && (
@@ -414,7 +418,12 @@ export default function App() {
                 </div>
                 <button
                   className="button secondary"
-                  onClick={() => void run(() => call("request_input_permissions"), "Permission status refreshed. Approve the system prompts, then retry or restart if requested.")}
+                  onClick={() =>
+                    void run(
+                      () => call("request_input_permissions"),
+                      "Permission status refreshed. Approve the system prompts, then retry or restart if requested.",
+                    )
+                  }
                 >
                   Grant permissions / Retry
                 </button>
@@ -807,6 +816,12 @@ export default function App() {
                 </div>
                 <p className="footnote">{data.permissions.explanation}</p>
                 <dl className="diagnostic-values">
+                  {data.suppressed_events != null && (
+                    <div>
+                      <dt>Locally suppressed input events</dt>
+                      <dd>{data.suppressed_events}</dd>
+                    </div>
+                  )}
                   <div>
                     <dt>Listening port</dt>
                     <dd>TCP {data.listening_port}</dd>
@@ -1182,9 +1197,18 @@ function TransferRow({
         )}
         <p className="device-error">{t.error}</p>
         {t.saved_path && <small>Saved to {t.saved_path}</small>}
-        {native && t.direction === "incoming" && t.state === "complete" && t.saved_path && (
-          <button className="text-button" onClick={copy} aria-label={`Copy received ${t.name}`}>Copy file for pasting</button>
-        )}
+        {native &&
+          t.direction === "incoming" &&
+          t.state === "complete" &&
+          t.saved_path && (
+            <button
+              className="text-button"
+              onClick={copy}
+              aria-label={`Copy received ${t.name}`}
+            >
+              Copy file for pasting
+            </button>
+          )}
       </div>
       {t.state === "offered" ? (
         <div className="transfer-buttons">
@@ -1485,6 +1509,55 @@ function Arrangement({
       ? data.local
       : data.peers.find((p) => p.device.id === id)?.device;
   const key = (d: LayoutDisplay) => `${d.device_id}/${d.display_id}`;
+  const nativeDisplay = (d: LayoutDisplay) =>
+    device(d.device_id)?.displays.find((n) => n.id === d.display_id);
+  const displayLabel = (d: LayoutDisplay) => {
+    const owner = device(d.device_id),
+      native = nativeDisplay(d);
+    if (!owner || !native) return "Offline display";
+    const ordered = [...owner.displays].sort(
+      (a, b) =>
+        a.bounds.x - b.bounds.x ||
+        a.bounds.y - b.bounds.y ||
+        a.id.localeCompare(b.id),
+    );
+    return `Display ${ordered.findIndex((n) => n.id === d.display_id) + 1}${native.primary ? " · Primary" : ""}`;
+  };
+  const useNativeOrder = () => {
+    setDraft((old) => {
+      const origins = new Map<
+        string,
+        { x: number; y: number; nativeX: number; nativeY: number }
+      >();
+      for (const d of old) {
+        const owner = device(d.device_id);
+        if (!owner?.displays.length || origins.has(owner.id)) continue;
+        const group = old.filter((e) => e.device_id === owner.id);
+        origins.set(owner.id, {
+          x: Math.min(...group.map((e) => e.rect.x)),
+          y: Math.min(...group.map((e) => e.rect.y)),
+          nativeX: Math.min(...owner.displays.map((e) => e.bounds.x)),
+          nativeY: Math.min(...owner.displays.map((e) => e.bounds.y)),
+        });
+      }
+      return old.map((d) => {
+        const origin = origins.get(d.device_id),
+          native = nativeDisplay(d);
+        return origin && native
+          ? {
+              ...d,
+              rect: {
+                x: origin.x + native.bounds.x - origin.nativeX,
+                y: origin.y + native.bounds.y - origin.nativeY,
+                width: native.bounds.width,
+                height: native.bounds.height,
+              },
+            }
+          : d;
+      });
+    });
+    setDirty(true);
+  };
   const move = (id: string, x: number, y: number) => {
     setDraft((old) => {
       const target = old.find((d) => key(d) === id);
@@ -1525,7 +1598,8 @@ function Arrangement({
           <h2>Arrange your displays</h2>
           <p>
             Place screens like they sit on your desk. Touching edges let your
-            cursor cross.
+            cursor cross. For control in both directions, set the same
+            arrangement on each computer.
           </p>
         </div>
         <button className="button secondary" onClick={add}>
@@ -1541,6 +1615,9 @@ function Arrangement({
         </span>
         <div>
           {dirty && <Badge tone="warning">Unsaved changes</Badge>}
+          <button className="text-button" onClick={useNativeOrder}>
+            Use OS display order
+          </button>
           <button
             className="text-button"
             onClick={() => {
@@ -1594,7 +1671,7 @@ function Arrangement({
               >
                 <button
                   className="screen-drag"
-                  aria-label={`Arrange ${owner?.name || "Offline computer"} display`}
+                  aria-label={`Arrange ${owner?.name || "Offline computer"} display${(owner?.displays.length || 0) > 1 ? ` ${displayLabel(d)}` : ""}`}
                   onFocus={() => setSelected(id)}
                   onPointerDown={(e) => {
                     if (e.button !== 0) return;
@@ -1665,6 +1742,7 @@ function Arrangement({
                     <span className={`status-dot ${online ? "" : "gray"}`} />
                   </span>
                   <strong>{owner?.name || "Offline computer"}</strong>
+                  <small>{displayLabel(d)}</small>
                   <small>
                     {d.rect.width} × {d.rect.height}
                   </small>
@@ -1723,7 +1801,9 @@ function Arrangement({
           const digit = binding?.keys.find((k) => k >= 30 && k <= 38) || 0;
           return (
             <div className="display-inspector">
-              <span>{device(d.device_id)?.name} display</span>
+              <span>
+                {device(d.device_id)?.name} · {displayLabel(d)}
+              </span>
               <label htmlFor="hop-shortcut">Hop shortcut</label>
               <select
                 id="hop-shortcut"

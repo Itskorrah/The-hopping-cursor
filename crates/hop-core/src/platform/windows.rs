@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use std::{
     collections::BTreeSet,
     sync::{
-        atomic::{AtomicU32, Ordering},
-        Mutex, OnceLock,
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
     },
     thread::JoinHandle,
 };
@@ -20,6 +20,8 @@ pub struct Windows {
     thread: Mutex<Option<JoinHandle<()>>>,
     held: Mutex<BTreeSet<u16>>,
     buttons: Mutex<BTreeSet<u8>>,
+    cursor: Mutex<Option<usize>>,
+    suppressed: Arc<AtomicU64>,
 }
 impl Windows {
     pub fn new() -> Self {
@@ -35,6 +37,8 @@ impl Windows {
             thread: Mutex::new(None),
             held: Mutex::new(BTreeSet::new()),
             buttons: Mutex::new(BTreeSet::new()),
+            cursor: Mutex::new(None),
+            suppressed: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -53,6 +57,8 @@ unsafe extern "system" fn keyboard_hook(code: i32, w: WPARAM, l: LPARAM) -> LRES
                 if callback(CapturedEvent::Input(InputEvent::Key { code: hid, down })) {
                     return 1;
                 }
+            } else if callback(CapturedEvent::Unsupported) {
+                return 1;
             }
         }
     }
@@ -100,6 +106,9 @@ unsafe extern "system" fn mouse_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
                 _ => None,
             };
             if event.is_some_and(callback) {
+                if w as u32 == WM_MOUSEMOVE {
+                    SetCursor(std::ptr::null_mut());
+                }
                 return 1;
             }
         }
@@ -153,7 +162,14 @@ impl Platform for Windows {
             guard.is_none(),
             "Only one native input engine can run in this process"
         );
-        *guard = Some(cb);
+        let suppressed = self.suppressed.clone();
+        *guard = Some(Arc::new(move |event| {
+            let consumed = cb(event);
+            if consumed {
+                suppressed.fetch_add(1, Ordering::Relaxed);
+            }
+            consumed
+        }));
         drop(guard);
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = std::thread::spawn(move || unsafe {
@@ -193,6 +209,7 @@ impl Platform for Windows {
         }
     }
     fn stop_capture(&self) {
+        let _ = self.set_forwarding(false);
         let id = self.thread_id.swap(0, Ordering::SeqCst);
         if id != 0 {
             unsafe {
@@ -205,6 +222,29 @@ impl Platform for Windows {
                 *c.lock().unwrap() = None;
             }
         }
+    }
+    fn set_forwarding(&self, forwarding: bool) -> Result<()> {
+        let mut previous = self.cursor.lock().unwrap();
+        unsafe {
+            if forwarding && previous.is_none() {
+                let mut info: CURSORINFO = std::mem::zeroed();
+                info.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
+                anyhow::ensure!(
+                    GetCursorInfo(&mut info) != 0,
+                    "Cannot read source cursor state"
+                );
+                *previous = Some(info.hCursor as usize);
+                SetCursor(std::ptr::null_mut());
+            } else if !forwarding {
+                if let Some(cursor) = previous.take() {
+                    SetCursor(cursor as HCURSOR);
+                }
+            }
+        }
+        Ok(())
+    }
+    fn suppressed_events(&self) -> Option<u64> {
+        Some(self.suppressed.load(Ordering::Relaxed))
     }
     fn inject(&self, event: &InputEvent) -> Result<()> {
         if *event == InputEvent::ReleaseAll {

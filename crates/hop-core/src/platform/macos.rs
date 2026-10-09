@@ -5,8 +5,8 @@ use std::{
     collections::BTreeSet,
     ffi::c_void,
     sync::{
-        atomic::{AtomicUsize, Ordering},
-        Mutex,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc, Mutex,
     },
     thread::JoinHandle,
 };
@@ -66,6 +66,17 @@ extern "C" {
     fn CGEventCreateMouseEvent(source: Ref, kind: u32, point: Point, button: u32) -> Ref;
     fn CGEventCreateScrollWheelEvent(source: Ref, units: u32, count: u32, ...) -> Ref;
     fn CGEventPost(tap: u32, event: Ref);
+    fn CGWarpMouseCursorPosition(point: Point) -> i32;
+    fn CGDisplayHideCursor(display: u32) -> i32;
+    fn CGDisplayShowCursor(display: u32) -> i32;
+    fn CGEventSourceCreate(state: i32) -> Ref;
+    fn CGEventSourceSetUserData(source: Ref, data: i64);
+    fn CGEventSourceSetLocalEventsSuppressionInterval(source: Ref, seconds: f64);
+    fn CGEventSourceSetLocalEventsFilterDuringSuppressionState(
+        source: Ref,
+        filter: u32,
+        state: u32,
+    );
     fn CGPreflightListenEventAccess() -> bool;
     fn CGRequestListenEventAccess() -> bool;
     fn CGGetActiveDisplayList(max: u32, ids: *mut u32, count: *mut u32) -> i32;
@@ -108,6 +119,8 @@ struct TapContext {
     callback: CaptureCallback,
     tap: Ref,
     modifiers: BTreeSet<u16>,
+    parked: Arc<Mutex<Option<Point>>>,
+    suppressed: Arc<AtomicU64>,
 }
 extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
     unsafe {
@@ -169,7 +182,17 @@ extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
             }),
             _ => None,
         };
+        let captured =
+            captured.or_else(|| matches!(kind, 10..=12).then_some(CapturedEvent::Unsupported));
         if captured.is_some_and(|e| (ctx.callback)(e)) {
+            ctx.suppressed.fetch_add(1, Ordering::Relaxed);
+            // Quartz can update the hardware cursor before an active session
+            // filter deletes the event. Park it without generating another event.
+            if matches!(kind, 5 | 6 | 7 | 27) {
+                if let Some(point) = *ctx.parked.lock().unwrap() {
+                    CGWarpMouseCursorPosition(point);
+                }
+            }
             std::ptr::null_mut()
         } else {
             event
@@ -181,6 +204,9 @@ pub struct Mac {
     thread: Mutex<Option<JoinHandle<()>>>,
     held: Mutex<BTreeSet<u16>>,
     buttons: Mutex<BTreeSet<u8>>,
+    parked: Arc<Mutex<Option<Point>>>,
+    source: Mutex<usize>,
+    suppressed: Arc<AtomicU64>,
 }
 impl Mac {
     pub fn new() -> Self {
@@ -189,6 +215,9 @@ impl Mac {
             thread: Mutex::new(None),
             held: Mutex::new(BTreeSet::new()),
             buttons: Mutex::new(BTreeSet::new()),
+            parked: Arc::new(Mutex::new(None)),
+            source: Mutex::new(0),
+            suppressed: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -280,17 +309,23 @@ impl Platform for Mac {
         let p = self.permissions();
         anyhow::ensure!(p.capture && p.injection, "{}", p.explanation);
         let (tx, rx) = std::sync::mpsc::channel();
+        let parked = self.parked.clone();
+        let suppressed = self.suppressed.clone();
         let handle = std::thread::spawn(move || unsafe {
             let ctx = Box::new(TapContext {
                 callback: cb,
                 tap: std::ptr::null_mut(),
                 modifiers: BTreeSet::new(),
+                parked,
+                suppressed,
             });
             let ptr = Box::into_raw(ctx);
             let mask = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 22, 25, 26, 27]
                 .iter()
                 .fold(0u64, |m, n| m | (1 << n));
-            let tap = CGEventTapCreate(0, 0, 0, mask, event_callback, ptr as _);
+            // An active session filter can discard input before application
+            // delivery without relying on privileged HID-level interception.
+            let tap = CGEventTapCreate(1, 0, 0, mask, event_callback, ptr as _);
             if tap.is_null() {
                 let _ = tx.send(Err(
                     "Could not create macOS input tap. Check permissions.".to_string()
@@ -323,6 +358,7 @@ impl Platform for Mac {
         }
     }
     fn stop_capture(&self) {
+        let _ = self.set_forwarding(false);
         let r = self.runloop.swap(0, Ordering::SeqCst);
         if r != 0 {
             unsafe {
@@ -332,6 +368,26 @@ impl Platform for Mac {
                 let _ = h.join();
             }
         }
+    }
+    fn set_forwarding(&self, forwarding: bool) -> Result<()> {
+        let mut parked = self.parked.lock().unwrap();
+        unsafe {
+            if forwarding && parked.is_none() {
+                let event = CGEventCreate(std::ptr::null_mut());
+                anyhow::ensure!(!event.is_null(), "Cannot locate source cursor");
+                let point = CGEventGetLocation(event);
+                CFRelease(event);
+                anyhow::ensure!(CGDisplayHideCursor(0) == 0, "Cannot hide source cursor");
+                *parked = Some(point);
+            } else if !forwarding && parked.is_some() {
+                anyhow::ensure!(CGDisplayShowCursor(0) == 0, "Cannot restore source cursor");
+                *parked = None;
+            }
+        }
+        Ok(())
+    }
+    fn suppressed_events(&self) -> Option<u64> {
+        Some(self.suppressed.load(Ordering::Relaxed))
     }
     fn inject(&self, event: &InputEvent) -> Result<()> {
         if *event == InputEvent::ReleaseAll {
@@ -349,9 +405,20 @@ impl Platform for Mac {
             return Ok(());
         }
         unsafe {
+            let mut source = self.source.lock().unwrap();
+            if *source == 0 {
+                let value = CGEventSourceCreate(-1); // private remote-input state
+                anyhow::ensure!(!value.is_null(), "Cannot create macOS input source");
+                CGEventSourceSetUserData(value, MARKER);
+                CGEventSourceSetLocalEventsSuppressionInterval(value, 0.);
+                CGEventSourceSetLocalEventsFilterDuringSuppressionState(value, 7, 0);
+                CGEventSourceSetLocalEventsFilterDuringSuppressionState(value, 7, 1);
+                *source = value as usize;
+            }
+            let source = *source as Ref;
             let e = match event {
                 InputEvent::Key { code, down } => CGEventCreateKeyboardEvent(
-                    std::ptr::null_mut(),
+                    source,
                     keys::hid_to_mac(*code).context("Unsupported keyboard key")?,
                     *down,
                 ),
@@ -363,12 +430,7 @@ impl Platform for Mac {
                         Some(button) => (27, *button as u32),
                         None => (5, 0),
                     };
-                    CGEventCreateMouseEvent(
-                        std::ptr::null_mut(),
-                        kind,
-                        Point { x: *x, y: *y },
-                        button,
-                    )
+                    CGEventCreateMouseEvent(source, kind, Point { x: *x, y: *y }, button)
                 }
                 InputEvent::Button { button, down } => {
                     let current = CGEventCreate(std::ptr::null_mut());
@@ -382,10 +444,10 @@ impl Platform for Mac {
                         (_, true) => 25,
                         (_, false) => 26,
                     };
-                    CGEventCreateMouseEvent(std::ptr::null_mut(), kind, p, *button as u32)
+                    CGEventCreateMouseEvent(source, kind, p, *button as u32)
                 }
                 InputEvent::Scroll { x, y } => {
-                    CGEventCreateScrollWheelEvent(std::ptr::null_mut(), 1, 2, *y as i32, *x as i32)
+                    CGEventCreateScrollWheelEvent(source, 1, 2, *y as i32, *x as i32)
                 }
                 InputEvent::ReleaseAll => unreachable!(),
             };
@@ -472,6 +534,12 @@ impl Drop for Mac {
     fn drop(&mut self) {
         self.stop_capture();
         let _ = self.inject(&InputEvent::ReleaseAll);
+        let source = *self.source.get_mut().unwrap();
+        if source != 0 {
+            unsafe {
+                CFRelease(source as Ref);
+            }
+        }
     }
 }
 
@@ -514,5 +582,63 @@ pub fn read_html() -> Option<String> {
         };
         objc_autoreleasePoolPop(pool);
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mac_active_filter_discards_clicks_and_unmapped_keys_without_posting_events() {
+        // Construct isolated events and call the filter directly. Never post
+        // test input into the user's session or request native permissions.
+        unsafe {
+            let source = CGEventSourceCreate(-1);
+            assert!(!source.is_null());
+            let click = CGEventCreateMouseEvent(source, 3, Point { x: 100., y: 100. }, 1);
+            let unmapped = CGEventCreateKeyboardEvent(source, u16::MAX, true);
+            let mut context = TapContext {
+                callback: Arc::new(|_| true),
+                tap: std::ptr::null_mut(),
+                modifiers: BTreeSet::new(),
+                parked: Arc::new(Mutex::new(None)),
+                suppressed: Arc::new(AtomicU64::new(0)),
+            };
+            for (kind, event) in [(3, click), (10, unmapped)] {
+                assert!(!event.is_null());
+                assert!(event_callback(
+                    std::ptr::null_mut(),
+                    kind,
+                    event,
+                    &mut context as *mut _ as Ref
+                )
+                .is_null());
+            }
+            context.callback = Arc::new(|_| false);
+            assert_eq!(
+                event_callback(
+                    std::ptr::null_mut(),
+                    3,
+                    click,
+                    &mut context as *mut _ as Ref
+                ),
+                click
+            );
+            context.callback = Arc::new(|_| panic!("Own injected input must bypass capture"));
+            CGEventSetIntegerValueField(click, 42, MARKER);
+            assert_eq!(
+                event_callback(
+                    std::ptr::null_mut(),
+                    3,
+                    click,
+                    &mut context as *mut _ as Ref
+                ),
+                click
+            );
+            CFRelease(click);
+            CFRelease(unmapped);
+            CFRelease(source);
+        }
     }
 }

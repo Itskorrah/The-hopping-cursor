@@ -172,6 +172,7 @@ pub struct Snapshot {
     pub diagnostics: Vec<String>,
     pub version: String,
     pub session_available: bool,
+    pub suppressed_events: Option<u64>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerPermissions {
@@ -206,8 +207,15 @@ impl InputEvent {
 }
 #[derive(Debug, Clone)]
 pub enum CapturedEvent {
-    Move { x: f64, y: f64, dx: f64, dy: f64 },
+    Move {
+        x: f64,
+        y: f64,
+        dx: f64,
+        dy: f64,
+    },
     Input(InputEvent),
+    /// A native key without a portable mapping must not leak to the source.
+    Unsupported,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
