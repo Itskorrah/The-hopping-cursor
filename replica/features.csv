@@ -2,9 +2,9 @@ feature,area,priority,original,clone,notes
 Encrypted transport,security,must,yes,yes,Noise XX frames; integration tested; external audit pending
 Explicit authenticated pairing,security,must,yes,yes,Compare full code and approve both sides; pinning and revocation tested
 Automatic discovery,network,must,yes,yes,mDNS plus manual private IP; physical isolated-network testing pending
-Reconnect and recovery,network,must,yes,yes,Heartbeat watchdog; integration recovery and held keys tested
-Edge cursor hopping,input,must,yes,partial,0.1.2 Raw Input edge motion and coordinated cursor focus; controller takeover regressions; user confirms basic two-way 0.1.2 control; Windows-source feel and broader physical acceptance pending
-Keyboard sharing and modifier mapping,input,must,yes,partial,HID mapping and idle-peer keyboards following focus; disconnect cleanup tested; basic two-way typing user-reported; Windows E opens Mac emoji picker; native and international layout tests pending
+Reconnect and recovery,network,must,yes,yes,Heartbeat watchdog; integration recovery and held keys tested; 0.1.3 capture readiness and local setup blocker UI; remembered-endpoint Reconnect action
+Edge cursor hopping,input,must,yes,partial,0.1.2 Raw Input edge motion and coordinated cursor focus; controller takeover regressions; user confirms basic two-way 0.1.2 control; 0.1.3 Windows native processed motion and bounded position coalescing; native parking probe and encrypted burst pass; Windows-source feel and broader physical acceptance pending
+Keyboard sharing and modifier mapping,input,must,yes,partial,HID mapping and idle-peer keyboards following focus; disconnect cleanup tested; basic two-way typing user-reported; 0.1.3 strips inherited Mac Fn flags; E/emoji physical acceptance and international layout tests pending
 Multiple display arrangement,layout,must,yes,partial,Offset stacked hidden and reversed enumeration tested; primary labels and OS-order repair; explicit accepted arrangement sharing; physical retest pending
 Clipboard text,clipboard,must,yes,partial,Real encrypted exchange tested with memory adapter; OS pasteboard tests pending
 Clipboard images and formatting,clipboard,should,yes,partial,PNG/HTML adapters compile; cross-app OS tests pending

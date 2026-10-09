@@ -95,6 +95,7 @@ async fn main() -> Result<()> {
                 hop_core::StartOptions {
                     discovery: !no_discovery,
                     protect_identity: true,
+                    loopback_only: false,
                 },
             )
             .await?;

@@ -22,6 +22,7 @@ async fn discovery_is_untrusted_and_renames_refresh_without_granting_access() {
     let options = StartOptions {
         discovery: true,
         protect_identity: false,
+        loopback_only: false,
     };
     let a = Service::start_with_options(
         da.path().into(),

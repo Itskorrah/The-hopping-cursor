@@ -1,5 +1,11 @@
 # Test evidence and remaining plan
 
+Latest Windows-native 0.1.3 pass: **59 core tests + one separately run native
+pointer probe + 16 browser tests pass**. Both Mac core targets check; physical
+Mac runtime/feel acceptance remains pending. See [TEST_0.1.3](../docs/TEST_0.1.3.md)
+for the concrete new regressions, baseline failure and toolchain. The historical
+0.1.2 evidence below is not a claim that Mac 0.1.3 was executed.
+
 Automated core checks: key mapping round trips, physical scan positions,
 offset/hidden topology, invalid layouts, safe filenames, actual two-service
 encrypted pairing and trust, acceptance/refusal, duplicate files and byte

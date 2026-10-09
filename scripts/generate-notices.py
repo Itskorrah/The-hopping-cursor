@@ -37,14 +37,14 @@ def main():
               "below. Local package notices are preserved verbatim where provided.\n"
               "Upstream and standard license texts supplement packages that omit\n"
               "license files. Installed agent skills keep their separate licenses.\n"]
-    output.append(section("Original application code — MIT", (ROOT / "LICENSE").read_text()))
+    output.append(section("Original application code — MIT", (ROOT / "LICENSE").read_text(encoding="utf-8")))
     for name in NPM:
         directory = ROOT / "node_modules" / name
-        package = json.loads((directory / "package.json").read_text())
+        package = json.loads((directory / "package.json").read_text(encoding="utf-8"))
         files = notice_files(directory)
         if not files:
             raise RuntimeError("Missing npm notices: " + name)
-        text = "\n".join("\n--- " + p.name + " ---\n" + p.read_text(errors="replace") for p in files)
+        text = "\n".join("\n--- " + p.name + " ---\n" + p.read_text(encoding="utf-8", errors="replace") for p in files)
         output.append(section(name + "@" + package["version"], text))
 
     packages = {}
@@ -55,7 +55,7 @@ def main():
         for package in metadata["packages"]:
             if package["id"] in active and package["source"] is not None:
                 packages[package["id"]] = package
-    overrides = json.loads((ROOT / "scripts/license-overrides.json").read_text())
+    overrides = json.loads((ROOT / "scripts/license-overrides.json").read_text(encoding="utf-8"))
     for package in sorted(packages.values(), key=lambda p: (p["name"], p["version"])):
         directory = Path(package["manifest_path"]).parent
         files = notice_files(directory)
@@ -69,7 +69,7 @@ def main():
         body += "Source: https://crates.io/api/v1/crates/" + package["name"] + "/" + package["version"] + "/download\n"
         body += "Repository: " + str(package.get("repository")) + "\n"
         if files:
-            body += "\n".join("\n--- " + str(p.relative_to(directory)) + " ---\n" + p.read_text(errors="replace") for p in files)
+            body += "\n".join("\n--- " + str(p.relative_to(directory)) + " ---\n" + p.read_text(encoding="utf-8", errors="replace") for p in files)
         elif key in overrides:
             body += "\nUpstream notice: " + overrides[key]["source_url"] + "\n" + overrides[key]["content"]
         else:
@@ -78,13 +78,13 @@ def main():
             chosen = "MPL-2.0" if expression == "MPL-2.0" else "MIT" if "MIT" in expression else None
             if chosen is None:
                 raise RuntimeError("Review missing license text for " + key)
-            body += "\nStandard SPDX text (no upstream notice published):\n" + (ROOT / "scripts/license-templates" / (chosen + ".txt")).read_text()
+            body += "\nStandard SPDX text (no upstream notice published):\n" + (ROOT / "scripts/license-templates" / (chosen + ".txt")).read_text(encoding="utf-8")
         output.append(section(key, body))
     for name in ("MIT", "Apache-2.0", "MPL-2.0"):
-        output.append(section("Standard SPDX license text: " + name, (ROOT / "scripts/license-templates" / (name + ".txt")).read_text()))
+        output.append(section("Standard SPDX license text: " + name, (ROOT / "scripts/license-templates" / (name + ".txt")).read_text(encoding="utf-8")))
     path = ROOT / "apps/desktop/public/THIRD_PARTY_NOTICES.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(output))
+    path.write_text("\n".join(output), encoding="utf-8", newline="\n")
     print("Wrote native/font/UI notice inventory:", len(packages), "Rust packages;", path.stat().st_size, "bytes")
 
 if __name__ == "__main__":

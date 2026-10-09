@@ -2,6 +2,7 @@ pub mod config;
 pub mod crypto;
 mod identity_store;
 pub mod model;
+mod outbound;
 pub mod platform;
 mod service;
 pub mod topology;

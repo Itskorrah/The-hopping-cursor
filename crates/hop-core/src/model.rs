@@ -175,6 +175,8 @@ pub struct Snapshot {
     pub peer_permissions: BTreeMap<String, PeerPermissions>,
     pub transfers: Vec<TransferStatus>,
     pub permissions: Permissions,
+    pub capture_ready: bool,
+    pub displays_ready: bool,
     pub active_device: String,
     pub controller_device: String,
     pub cursor_visible: bool,

@@ -6,6 +6,33 @@ installer; closing its window leaves the tray engine running.
 
 ## Windows x64 on Windows
 
+On this Windows development PC, a machine-wide Build Tools install was rejected
+by automatic approval review. A user-local portable setup was then built and
+verified: Rust 1.99.0 MSVC, LLVM 22.1.8, xwin 0.10.0, CRT 14.44.17.14 and SDK
+10.0.26100. Its ignored files are in `.local/setup`; no registry or machine PATH
+changes are required. Activate it in each new PowerShell session:
+
+```powershell
+. ./scripts/use-windows-portable-toolchain.ps1
+```
+
+For reproduction, download LLVM's official `LLVM-22.1.8-win64.exe` and extract
+it with 7-Zip into `.local/setup/llvm` (without running its installer). LLVM's
+release SHA-256 is `16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c`.
+Download xwin's official Windows 0.10.0 archive, verify its released checksum,
+and extract it under `.local/setup`. Microsoft's CRT/SDK license applies; review
+it before running xwin with `--accept-license`:
+
+```powershell
+& .local/setup/xwin-0.10.0-x86_64-pc-windows-msvc/xwin.exe --accept-license --cache-dir .local/setup/xwin-cache splat --output .local/setup/winsysroot --use-winsysroot-style --preserve-ms-arch-notation --disable-symlinks
+```
+
+Sources: [LLVM release](https://github.com/llvm/llvm-project/releases/tag/llvmorg-22.1.8),
+[xwin release and checksum](https://github.com/Jake-Shadle/xwin/releases/tag/0.10.0),
+[xwin's Windows clang-cl layout guidance](https://github.com/Jake-Shadle/xwin#splat-options).
+The activation script selects the available CRT/SDK versions. Other hosts should
+use Tauri's normal Visual Studio prerequisites where available.
+
 Install Node.js 22+, Git, stable Rust with the MSVC target, and Microsoft's C++
 Build Tools with **Desktop development with C++**. WebView2 is also required.
 Follow [Tauri's Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows).

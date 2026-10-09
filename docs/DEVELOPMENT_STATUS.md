@@ -1,5 +1,11 @@
 # Development evidence — 2026-10-09
 
+Latest checkpoint: [Windows-native 0.1.3 evidence](TEST_0.1.3.md), 2026-10-10.
+Capture readiness, inherited Mac Fn flags and Windows motion processing/queue
+pressure have changes and regressions. Native Windows toolchain/installer and
+checks pass; Mac receiver and complete physical two-computer acceptance remain
+open. The earlier dated checkpoints below remain historical evidence.
+
 The project remains a development alpha. This pass continues the existing Rust/
 Tauri implementation and preserves peer identities, explicit approval, pinned
 keys, encrypted transport, separate bulk traffic, and emergency release.

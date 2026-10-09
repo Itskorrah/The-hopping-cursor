@@ -71,6 +71,7 @@ pub fn native() -> Arc<dyn Platform> {
 /// Linux input support. An in-memory clipboard enables deterministic integration tests.
 #[derive(Default)]
 pub struct Headless {
+    pub capture_blocked: std::sync::atomic::AtomicBool,
     pub forwarding: std::sync::atomic::AtomicBool,
     pub session_blocked: std::sync::atomic::AtomicBool,
     pub events: std::sync::Mutex<Vec<InputEvent>>,
@@ -114,6 +115,12 @@ impl Platform for Headless {
         Permissions{capture:false,injection:false,clipboard:false,explanation:"Linux is a headless protocol/transfer development target. Global input is available in Windows/macOS builds.".into()}
     }
     fn start_capture(&self, _: CaptureCallback) -> Result<()> {
+        anyhow::ensure!(
+            !self
+                .capture_blocked
+                .load(std::sync::atomic::Ordering::SeqCst),
+            "Test input capture unavailable"
+        );
         Ok(())
     }
     fn stop_capture(&self) {}

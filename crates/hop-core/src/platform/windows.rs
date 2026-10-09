@@ -19,6 +19,10 @@ use windows_sys::Win32::{
 };
 static CURSOR_WINDOW: AtomicUsize = AtomicUsize::new(0);
 static CURSOR_HIDDEN: AtomicBool = AtomicBool::new(false);
+// Store source position separately from the native pointer-processing anchor.
+// Parking inside a monitor gives Windows room to apply its pointer gain in
+// either direction, even after an edge handoff.
+static PARKING: OnceLock<Mutex<Option<(POINT, POINT)>>> = OnceLock::new();
 const CURSOR_UPDATE: u32 = WM_APP + 1;
 static CALLBACK: OnceLock<Mutex<Option<CaptureCallback>>> = OnceLock::new();
 pub struct Windows {
@@ -73,10 +77,34 @@ unsafe extern "system" fn mouse_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
         let m = &*(l as *const MSLLHOOKSTRUCT);
         if m.flags & LLMHF_INJECTED == 0 {
             let event = match w as u32 {
-                // Hardware motion is handled by WM_INPUT so screen clipping
-                // cannot erase outward movement. Never forward it twice.
+                // Use Windows' processed screen displacement while remote.
+                // Raw counts bypass pointer speed/acceleration and feel unlike
+                // the user's local desktop. WM_INPUT remains the local edge
+                // detector because clipping can erase outward motion there.
                 WM_MOUSEMOVE => {
                     if CURSOR_HIDDEN.load(Ordering::SeqCst) {
+                        let parking = *PARKING.get_or_init(|| Mutex::new(None)).lock().unwrap();
+                        if let Some((anchor, origin)) = parking {
+                            let dx = m.pt.x as f64 - anchor.x as f64;
+                            let dy = m.pt.y as f64 - anchor.y as f64;
+                            if dx != 0. || dy != 0. {
+                                let consumed = callback(CapturedEvent::Move {
+                                    // Active routing uses deltas; an idle peer
+                                    // reclaiming locally needs its saved source
+                                    // position, never the hidden parking anchor.
+                                    x: origin.x as f64 + dx,
+                                    y: origin.y as f64 + dy,
+                                    dx,
+                                    dy,
+                                });
+                                if !consumed && !CURSOR_HIDDEN.load(Ordering::SeqCst) {
+                                    SetCursorPos(origin.x + dx as i32, origin.y + dy as i32);
+                                }
+                            }
+                        }
+                        update_cursor_window();
+                        // Consume the handoff-return packet too: the service
+                        // has already injected its exact landing position.
                         return 1;
                     }
                     None
@@ -140,7 +168,9 @@ unsafe fn update_cursor_window() {
                     3,
                     SWP_NOACTIVATE | SWP_SHOWWINDOW,
                 );
-                SetCursorPos(point.x, point.y);
+                // Parking/restoration happens in set_forwarding. A late
+                // visibility update must never warp the pointer back after
+                // ownership has already returned locally.
                 SetCursor(std::ptr::null_mut());
             }
         }
@@ -161,6 +191,10 @@ unsafe extern "system" fn input_window(hwnd: HWND, message: u32, w: WPARAM, l: L
             return 1;
         }
         WM_INPUT => {
+            // This packet was already routed by the mouse hook when remote.
+            if CURSOR_HIDDEN.load(Ordering::SeqCst) {
+                return DefWindowProcW(hwnd, message, w, l);
+            }
             let mut raw: RAWINPUT = std::mem::zeroed();
             let mut size = std::mem::size_of::<RAWINPUT>() as u32;
             let n = GetRawInputData(
@@ -353,7 +387,47 @@ impl Platform for Windows {
         }
     }
     fn set_forwarding(&self, forwarding: bool) -> Result<()> {
-        CURSOR_HIDDEN.store(forwarding, Ordering::SeqCst);
+        use windows_sys::Win32::Graphics::Gdi::*;
+        let was_forwarding = CURSOR_HIDDEN.swap(forwarding, Ordering::SeqCst);
+        if forwarding != was_forwarding {
+            unsafe {
+                if forwarding {
+                    let mut origin: POINT = std::mem::zeroed();
+                    let mut monitor: MONITORINFO = std::mem::zeroed();
+                    monitor.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+                    if GetCursorPos(&mut origin) == 0
+                        || GetMonitorInfoW(
+                            MonitorFromPoint(origin, MONITOR_DEFAULTTONEAREST),
+                            &mut monitor,
+                        ) == 0
+                    {
+                        CURSOR_HIDDEN.store(false, Ordering::SeqCst);
+                        anyhow::bail!("Cannot park the source pointer");
+                    }
+                    let r = monitor.rcMonitor;
+                    let anchor = POINT {
+                        x: r.left + (r.right - r.left) / 2,
+                        y: r.top + (r.bottom - r.top) / 2,
+                    };
+                    *PARKING.get_or_init(|| Mutex::new(None)).lock().unwrap() =
+                        Some((anchor, origin));
+                    if SetCursorPos(anchor.x, anchor.y) == 0 {
+                        *PARKING.get_or_init(|| Mutex::new(None)).lock().unwrap() = None;
+                        CURSOR_HIDDEN.store(false, Ordering::SeqCst);
+                        anyhow::bail!("Cannot park the source pointer");
+                    }
+                } else {
+                    let parking = PARKING
+                        .get_or_init(|| Mutex::new(None))
+                        .lock()
+                        .unwrap()
+                        .take();
+                    if let Some((_, origin)) = parking {
+                        SetCursorPos(origin.x, origin.y);
+                    }
+                }
+            }
+        }
         let hwnd = CURSOR_WINDOW.load(Ordering::SeqCst) as HWND;
         if !hwnd.is_null() {
             unsafe {
@@ -553,5 +627,63 @@ pub fn read_html() -> Option<String> {
         };
         CloseClipboard();
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "Interactive desktop probe; quit other sharing engines and run serially"]
+    fn parked_motion_reclaim_uses_source_position_and_keeps_first_displacement() {
+        let native = Arc::new(Windows::new());
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let events = observed.clone();
+        let controller = Arc::downgrade(&native);
+        native
+            .start_capture(Arc::new(move |event| {
+                events.lock().unwrap().push(event);
+                controller.upgrade().unwrap().set_forwarding(false).unwrap();
+                false
+            }))
+            .unwrap();
+        unsafe {
+            let mut original: POINT = std::mem::zeroed();
+            assert_ne!(GetCursorPos(&mut original), 0);
+            native.set_forwarding(true).unwrap();
+            let (anchor, origin) = PARKING.get().unwrap().lock().unwrap().unwrap();
+            // Feed a synthetic, preprocessed native-hook packet directly. This
+            // checks callback/OS plumbing without claiming real device gain.
+            let packet = MSLLHOOKSTRUCT {
+                pt: POINT {
+                    x: anchor.x + 6,
+                    y: anchor.y - 3,
+                },
+                mouseData: 0,
+                flags: 0,
+                time: 0,
+                dwExtraInfo: 0,
+            };
+            let suppressed = mouse_hook(0, WM_MOUSEMOVE as WPARAM, &packet as *const _ as LPARAM);
+            let mut after: POINT = std::mem::zeroed();
+            GetCursorPos(&mut after);
+            // Restore before assertions so a failed probe leaves the desk usable.
+            native.stop_capture();
+            SetCursorPos(original.x, original.y);
+            assert_eq!(suppressed, 1);
+            let captured = observed.lock().unwrap();
+            assert!(
+                matches!(captured.as_slice(), [CapturedEvent::Move { x, y, dx: 6., dy: -3. }] if *x == origin.x as f64 + 6. && *y == origin.y as f64 - 3.)
+            );
+            assert!(!CURSOR_HIDDEN.load(Ordering::SeqCst));
+            // Desktop clipping is allowed if the saved source was at an edge.
+            assert!(
+                (after.x - origin.x).abs() <= 6 && (after.y - origin.y).abs() <= 3,
+                "Reclaim displacement: {}, {}",
+                after.x - origin.x,
+                after.y - origin.y
+            );
+        }
     }
 }

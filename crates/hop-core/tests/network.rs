@@ -19,6 +19,7 @@ async fn start_test(
         hop_core::StartOptions {
             discovery: false,
             protect_identity: false,
+            loopback_only: true,
         },
     )
     .await
@@ -50,6 +51,111 @@ async fn wait(mut check: impl FnMut() -> bool) {
 }
 async fn pair(auto_accept: bool) -> Pair {
     pair_with_displays(auto_accept, None).await
+}
+
+#[tokio::test]
+async fn failed_capture_stays_unavailable_through_session_and_display_refresh() {
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(Headless::default());
+    backend
+        .capture_blocked
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let service = start_test(dir.path().into(), Some(0), backend.clone())
+        .await
+        .unwrap();
+    assert!(!service.snapshot().capture_ready);
+    backend
+        .capture_blocked
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    service.refresh_session();
+    service.refresh_displays().unwrap();
+    assert!(!service.snapshot().capture_ready);
+    assert!(service
+        .snapshot()
+        .diagnostics
+        .iter()
+        .any(|d| d.contains("Input capture:")));
+    service.shutdown();
+    let restarted = start_test(dir.path().into(), Some(0), backend)
+        .await
+        .unwrap();
+    assert!(restarted.snapshot().capture_ready);
+    restarted.shutdown();
+}
+
+#[tokio::test]
+async fn motion_burst_over_encrypted_connection_preserves_click_and_key_order() {
+    let p = pair(true).await;
+    let remote = p.b.snapshot().local;
+    p.a.jump_to_display(&remote.id, &remote.displays[0].id)
+        .unwrap();
+    wait(|| p.b.snapshot().controller_device == p.a.snapshot().local.id).await;
+    p.pb.events.lock().unwrap().clear();
+    for index in 0..8000 {
+        assert!(p.a.capture(CapturedEvent::Move {
+            x: 0.,
+            y: 0.,
+            dx: if index % 2 == 0 { 0.05 } else { -0.05 },
+            dy: 0.
+        }));
+    }
+    for event in [
+        InputEvent::Button {
+            button: 0,
+            down: true,
+        },
+        InputEvent::Key {
+            code: 8,
+            down: true,
+        },
+        InputEvent::Key {
+            code: 8,
+            down: false,
+        },
+        InputEvent::Button {
+            button: 0,
+            down: false,
+        },
+    ] {
+        assert!(p.a.capture(CapturedEvent::Input(event)));
+    }
+    wait(|| {
+        p.pb.events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, InputEvent::Button { down: false, .. }))
+    })
+    .await;
+    let events = p.pb.events.lock().unwrap();
+    let discrete: Vec<_> = events
+        .iter()
+        .filter(|e| !matches!(e, InputEvent::Move { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(
+        discrete,
+        vec![
+            InputEvent::Button {
+                button: 0,
+                down: true
+            },
+            InputEvent::Key {
+                code: 8,
+                down: true
+            },
+            InputEvent::Key {
+                code: 8,
+                down: false
+            },
+            InputEvent::Button {
+                button: 0,
+                down: false
+            }
+        ]
+    );
+    assert!(events.iter().any(|e| matches!(e, InputEvent::Move { x, y } if (*x - 960.).abs() < 0.001 && (*y - 540.).abs() < 0.001)));
+    assert_eq!(p.a.snapshot().active_device, remote.id);
 }
 async fn pair_with_displays(auto_accept: bool, displays: Option<Vec<hop_core::Display>>) -> Pair {
     let da = tempfile::tempdir().unwrap();

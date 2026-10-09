@@ -1,5 +1,14 @@
 # Skill provenance
 
+2026-10-10 Windows pass: installed the user-requested official Vercel Find Skills
+into `.agents/skills/find-skills`, preserving its MIT license and provenance.
+Read it and checked the directory leaderboard; `npx skills find 'rust performance'`
+and `npx skills find 'windows input'` returned candidates. No exact Windows
+pointer-processing specialist was found. Existing Tauri, Replica Test,
+native-feel and Vercel React guidance cover this scoped pass; API behavior was
+checked against Microsoft Raw Input / low-level mouse documentation and Apple
+CGEventFlags. No additional unreviewed skill scripts were installed.
+
 Installed Replica Universal into `.agents/skills/` from
 https://github.com/Itskorrah/replica-skill-universal, using its Python installer.
 Applied recon, architect, design, build, backend, test, diff, and brand methods

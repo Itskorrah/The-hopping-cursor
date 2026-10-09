@@ -15,6 +15,165 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 test.afterEach(() => expect(errors).toEqual([]));
+test("older native snapshots cannot overwrite newer readiness and quit is available", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  await page.addInitScript(() => {
+    const snapshot = JSON.parse(
+      localStorage.getItem("hopping-cursor-interface-preview-v1")!,
+    );
+    let requests = 0;
+    Object.defineProperty(window, "__TAURI_EVENT_PLUGIN_INTERNALS__", {
+      value: { unregisterListener: () => {} },
+    });
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      value: {
+        metadata: {
+          currentWebview: { label: "main" },
+          currentWindow: { label: "main" },
+        },
+        transformCallback: () => 1,
+        unregisterCallback: () => {},
+        invoke: async (command: string, args: { address?: string } = {}) => {
+          if (command === "snapshot") {
+            if (++requests === 1)
+              return new Promise((resolve) => {
+                (
+                  window as unknown as { resolveOldSnapshot: () => void }
+                ).resolveOldSnapshot = () =>
+                  resolve({
+                    ...snapshot,
+                    settings: { ...snapshot.settings, paused: true },
+                  });
+              });
+            return structuredClone(snapshot);
+          }
+          if (command === "quit_app") {
+            document.documentElement.dataset.quitRequested = "true";
+            return;
+          }
+          if (command === "connect_address") {
+            if (args.address !== snapshot.peers[0].address)
+              throw new Error("Wrong remembered endpoint");
+            await new Promise<void>((resolve) => {
+              (
+                window as unknown as { completeReconnect: () => void }
+              ).completeReconnect = resolve;
+            });
+            snapshot.peers[0].connected = true;
+            return;
+          }
+          return 1;
+        },
+      },
+    });
+    (window as unknown as { disconnectFixture: () => void }).disconnectFixture =
+      () => {
+        snapshot.peers[0].connected = false;
+      };
+  });
+  await page.reload();
+  await expect(page.locator(".topbar")).toContainText("Workspace ready");
+  await page.evaluate(() =>
+    (
+      window as unknown as { resolveOldSnapshot: () => void }
+    ).resolveOldSnapshot(),
+  );
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  await expect(page.locator(".topbar")).toContainText("Workspace ready");
+  await expect(
+    page.getByText(
+      "Interface preview with sample computers. Real sharing runs in the desktop app.",
+    ),
+  ).toHaveCount(0);
+  await page.evaluate(() =>
+    (
+      window as unknown as { disconnectFixture: () => void }
+    ).disconnectFixture(),
+  );
+  await expect(page.locator(".topbar")).toContainText("Connect a computer");
+  await page.getByRole("button", { name: "Computers", exact: true }).click();
+  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Connecting…", exact: true }),
+  ).toBeDisabled();
+  await page.evaluate(() =>
+    (
+      window as unknown as { completeReconnect: () => void }
+    ).completeReconnect(),
+  );
+  await expect(page.locator(".topbar")).toContainText("Workspace ready");
+  await expect(
+    page.getByRole("button", { name: "Reconnect", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Quit application" }).click();
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-quit-requested",
+    "true",
+  );
+});
+test("workspace identifies connection, permissions, pause and arrangement blockers", async ({
+  page,
+}) => {
+  // Persist the preview fixture first, then alter states reported by the engine.
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
+  const patch = async (state: string) => {
+    await page.evaluate((state) => {
+      const key = "hopping-cursor-interface-preview-v1";
+      const snapshot = JSON.parse(localStorage.getItem(key)!);
+      if (state === "disconnected")
+        snapshot.peers.forEach(
+          (p: { connected: boolean }) => (p.connected = false),
+        );
+      if (state === "permissions") {
+        snapshot.peers[0].connected = true;
+        snapshot.peer_permissions["pc-preview"].input = false;
+      }
+      if (state === "layout") {
+        snapshot.peer_permissions["pc-preview"].input = true;
+        snapshot.layout.find(
+          (d: { device_id: string }) => d.device_id === "pc-preview",
+        ).rect.x = 2000;
+      }
+      if (state === "capture") snapshot.capture_ready = false;
+      if (state === "display") {
+        snapshot.capture_ready = true;
+        snapshot.displays_ready = false;
+      }
+      if (state === "game") {
+        snapshot.displays_ready = true;
+        snapshot.settings.game_mode = true;
+      }
+      if (state === "paused") snapshot.settings.paused = true;
+      localStorage.setItem(key, JSON.stringify(snapshot));
+    }, state);
+    await page.reload();
+  };
+  for (const [state, text] of [
+    ["disconnected", "Connect a computer"],
+    ["permissions", "Enable input sharing"],
+    ["layout", "Arrange your screens"],
+    ["capture", "Input capture unavailable"],
+    ["display", "Display unavailable"],
+    ["game", "Edge handoffs disabled"],
+    ["paused", "Sharing paused"],
+  ]) {
+    await patch(state);
+    await expect(page.locator(".topbar")).toContainText(text);
+    await expect(page.locator(".topbar")).not.toContainText("Workspace ready");
+  }
+  await expect(
+    page.getByText("Choose Resume when you want to share input again."),
+  ).toBeVisible();
+});
 test("workspace clearly labels preview and sharing can be paused", async ({
   page,
 }) => {
@@ -24,7 +183,7 @@ test("workspace clearly labels preview and sharing can be paused", async ({
     ),
   ).toBeVisible();
   await page.getByRole("button", { name: "Pause", exact: true }).click();
-  await expect(page.getByText("Sharing paused")).toBeVisible();
+  await expect(page.locator(".topbar")).toContainText("Sharing paused");
   await page.reload();
   await expect(
     page.getByRole("button", { name: "Resume", exact: true }),

@@ -1,5 +1,12 @@
 # The Hopping Cursor
 
+**Windows experience pass: v0.1.3.** Windows remote movement now uses the OS's
+processed pointer displacement, with bounded pending motion instead of a growing
+position backlog. Mac injection rejects inherited Fn/Globe flags. Workspace
+status identifies local setup blockers and offers capture retry. Windows native
+builds and automated checks pass; physical Mac receiver and two-computer feel
+acceptance remain pending. See [0.1.3 evidence](docs/TEST_0.1.3.md).
+
 A desktop application for sharing a mouse, keyboard, clipboard, and files between your own computers on a local network. A Rust engine, native Windows and macOS input adapters, and a Tauri/React control interface. Independently implemented from public product research; no proprietary code or assets used.
 
 **Status: development alpha.** The encrypted engine and desktop controls are implemented. Windows x64 and Intel/Apple Silicon Mac installers have built successfully on native GitHub runners. Most engine tests use an in-memory OS adapter; isolated Mac pasteboard tests exercise native APIs; user testing now confirms basic Windows↔Mac control, while broader input/permission acceptance still requires the hardware checklist below. This is not yet a production replacement for a mature software KVM.
@@ -10,9 +17,9 @@ Actual macOS app window captured on 2026-10-10, with a connected two-monitor PC.
 The sidebar fills the window height; this is not the browser sample preview.
 
 **Continue development on Windows:** [Windows handoff](docs/WINDOWS_HANDOFF.md).
-The latest 0.1.2 source is consolidated into `main` as an alpha checkpoint.
-User testing confirms basic control in both directions. Windows→Mac mouse feel,
-the E/emoji keyboard bug and connection/setup friction remain open; see below.
+The 0.1.2 checkpoint confirmed basic control in both directions. The 0.1.3
+Windows pass addresses input flags, movement pressure and setup status; physical
+Windows→Mac feel, E/emoji and reconnect acceptance remain open.
 
 ## What's built
 
@@ -53,14 +60,14 @@ ID signing is still needed for dependable permission continuity and distribution
 1. Open Computers on both machines. Discovery uses mDNS; if needed, use Add computer with a local address such as `192.168.1.20:24810`.
 2. Pair the computer, compare the **entire safety code** on both screens, and approve it on **both**. One-sided approval does not permit sharing.
 3. Arrange your displays with touching edges and save. Click **Share arrangement**, then review and **Apply arrangement** in Workspace on the other computer. Sharing never silently replaces its saved layout.
-4. Confirm both apps are 0.1.2 and **Resume** sharing on both if paused. Move toward a shared edge. Your keyboard follows the cursor. Use **Ctrl+Alt+Escape** on the source computer to bring input back immediately.
+4. For the latest acceptance pass, update both apps to 0.1.3 and **Resume** sharing on both if paused. Move toward a shared edge. Your keyboard follows the cursor. Use **Ctrl+Alt+Escape** on the source computer to bring input back immediately. Workspace reports local setup blockers; also check the other app's pause and permissions. Offline paired computers reconnect automatically, with an explicit **Reconnect** action in Computers.
 5. Send files from File transfers or drop them into the app window. The receiver accepts the offer. Completed files go to the receiving folder in Preferences. To send files copied in Finder/Explorer, use **Send copied files**. A verified received file offers **Copy file for pasting** into another folder.
 
 Select a monitor to assign **Ctrl+Alt+1–9** hop shortcuts or use **Jump here**. Save named layout profiles for different desks. Pair permissions separately control input, clipboard, and files. **Pause** returns input locally, stops sharing, and cancels pending/active file transfers.
 
 Identity keys migrate into macOS Keychain or user-bound Windows DPAPI storage without changing pairings. A locked/missing protected identity fails startup rather than silently generating a new one. Linux/headless test configurations retain permission-restricted file storage.
 
-Closing the window keeps the engine in the tray. **Quit** from the tray stops sharing and releases input. Display changes are checked every two seconds; input returns locally and peers reconnect with fresh display metadata. Saved profiles are reconciled against attached displays. Driver/port changes and identical monitors still need hardware validation. Default networking is TCP **24810**, mDNS UDP **5353**. No port forwarding is needed. Guest Wi-Fi/client isolation may block peers.
+Closing the window keeps the engine in the tray. **Quit application** in the window or **Quit** from the tray stops sharing and releases input. Display changes are checked every two seconds; input returns locally and peers reconnect with fresh display metadata. Saved profiles are reconciled against attached displays. Driver/port changes and identical monitors still need hardware validation. Default networking is TCP **24810**, mDNS UDP **5353**. No port forwarding is needed. Guest Wi-Fi/client isolation may block peers.
 
 Build installers locally:
 
@@ -80,7 +87,7 @@ codesign --verify --deep --strict --verbose=2 "target/debug/bundle/macos/The Hop
 
 The ad hoc default follows [Tauri's signing guidance](https://v2.tauri.app/distribute/sign/macos/#ad-hoc-signing).
 
-For the current Windows test package, download [0.1.2-test.1](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.2-test.1), extract the ZIP and run its setup executable after fully quitting the previous app. Keep identities/settings. It is unsigned; its local cross-build provenance is included. Both computers must be updated.
+For the latest Windows test package, download [0.1.3-test.1](https://github.com/Itskorrah/The-hopping-cursor/releases/tag/v0.1.3-test.1), extract the ZIP and run its setup executable after fully quitting the previous app. Keep identities/settings. It is unsigned; its local cross-build provenance is included. Both computers must be updated.
 
 For historical native-runner packages, open [GitHub Actions](https://github.com/Itskorrah/The-hopping-cursor/actions), select a successful **Build and verify** run, and download the Windows x64, macOS ARM64, or macOS Intel artifact. The workflow builds on native runners. Successful build artifacts are development packages, not signed public releases.
 
@@ -124,7 +131,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-The current suite has **55 Rust tests on macOS and 14 browser tests**. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
+The 0.1.3 suite has **59 passing Windows core tests, two separately run native pointer probes and 16 browser tests**. Core code checks for both Mac architectures; updated Mac runtime tests remain pending. The earlier 0.1.2 Mac checkpoint passed 55 Rust tests. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
 
 Dependency audit results and remaining warnings are recorded in [docs/SECURITY.md](docs/SECURITY.md). The prioritized path from this alpha to a release is in [docs/ROADMAP.md](docs/ROADMAP.md); the research feature matrix is in [replica/features.csv](replica/features.csv).
 

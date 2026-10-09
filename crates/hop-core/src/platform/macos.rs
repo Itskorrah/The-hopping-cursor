@@ -470,18 +470,13 @@ impl Platform for Mac {
                 }
                 _ => {}
             }
-            // Mouse/scroll events must carry the mapped held modifiers too.
-            // Preserve OS lock/function flags while replacing the four modifiers.
-            let mut flags = CGEventGetFlags(e) & !((1 << 17) | (1 << 18) | (1 << 19) | (1 << 20));
-            for h in self.held.lock().unwrap().iter() {
-                flags |= match h {
-                    224 | 228 => 1 << 18,
-                    225 | 229 => 1 << 17,
-                    226 | 230 => 1 << 19,
-                    227 | 231 => 1 << 20,
-                    _ => 0,
-                };
-            }
+            // Rebuild modifiers from authenticated remote state for every
+            // event, including mouse/scroll. Inherited Fn can turn E into
+            // the macOS emoji shortcut even with a private event source.
+            let flags = keys::mac_remote_flags(
+                CGEventGetFlags(e),
+                self.held.lock().unwrap().iter().copied(),
+            );
             CGEventSetFlags(e, flags);
             CGEventSetIntegerValueField(e, 42, MARKER);
             CGEventPost(0, e);

@@ -75,7 +75,7 @@ struct Active {
 struct Channel {
     generation: String,
     preferred: bool,
-    tx: mpsc::Sender<(u64, Message)>,
+    tx: Arc<crate::outbound::Outbound>,
     priority: mpsc::UnboundedSender<Message>,
     epoch: Arc<AtomicU64>,
 }
@@ -84,12 +84,15 @@ struct Channel {
 pub struct StartOptions {
     pub discovery: bool,
     pub protect_identity: bool,
+    /// Keep isolated protocol tests off LAN interfaces and firewall prompts.
+    pub loopback_only: bool,
 }
 impl Default for StartOptions {
     fn default() -> Self {
         Self {
             discovery: true,
             protect_identity: true,
+            loopback_only: false,
         }
     }
 }
@@ -112,6 +115,7 @@ pub struct Service {
     clipboard_retry: AtomicBool,
     pub(crate) session_available: AtomicBool,
     input_available: AtomicBool,
+    capture_started: AtomicBool,
     displays_available: AtomicBool,
     session_clock: Mutex<SystemTime>,
     metadata_changed: watch::Sender<u64>,
@@ -137,10 +141,16 @@ impl Service {
             config::load(&dir)?
         };
         let identity = Identity::from_config(&config)?;
-        let listener =
-            TcpListener::bind(("0.0.0.0", port_override.unwrap_or(config.settings.port)))
-                .await
-                .context("Could not listen: port already in use or firewall denied access")?;
+        let listener = TcpListener::bind((
+            if options.loopback_only {
+                "127.0.0.1"
+            } else {
+                "0.0.0.0"
+            },
+            port_override.unwrap_or(config.settings.port),
+        ))
+        .await
+        .context("Could not listen: port already in use or firewall denied access")?;
         let listening_port = listener.local_addr()?.port();
         let displays = backend.displays()?;
         anyhow::ensure!(!displays.is_empty(), "No displays found");
@@ -231,6 +241,7 @@ impl Service {
             file_batches: Mutex::new(BTreeMap::new()),
             session_available: AtomicBool::new(session_available),
             input_available: AtomicBool::new(input_available),
+            capture_started: AtomicBool::new(false),
             displays_available: AtomicBool::new(true),
             session_clock: Mutex::new(SystemTime::now()),
             listening_port,
@@ -240,7 +251,10 @@ impl Service {
         if let Err(e) = this.backend.start_capture(Arc::new(move |event| {
             weak.upgrade().is_some_and(|s| s.capture(event))
         })) {
+            this.input_available.store(false, Ordering::SeqCst);
             this.note(format!("Input capture: {e}"));
+        } else {
+            this.capture_started.store(true, Ordering::SeqCst);
         }
         this.note(format!(
             "Listening on TCP {listening_port}; encrypted connections only"
@@ -277,10 +291,17 @@ impl Service {
         if permissions.capture && permissions.injection {
             self.release();
             self.backend.stop_capture();
+            self.capture_started.store(false, Ordering::SeqCst);
+            self.input_available.store(false, Ordering::SeqCst);
             let weak = Arc::downgrade(self);
             self.backend.start_capture(Arc::new(move |event| {
                 weak.upgrade().is_some_and(|s| s.capture(event))
             }))?;
+            self.capture_started.store(true, Ordering::SeqCst);
+            self.input_available.store(
+                self.backend.input_available() && self.displays_available.load(Ordering::SeqCst),
+                Ordering::SeqCst,
+            );
         }
         Ok(permissions)
     }
@@ -320,6 +341,8 @@ impl Service {
                 .collect(),
             transfers: s.transfers.values().cloned().collect(),
             permissions: self.backend.permissions(),
+            capture_ready: self.capture_started.load(Ordering::SeqCst),
+            displays_ready: self.displays_available.load(Ordering::SeqCst),
             active_device: s
                 .active
                 .as_ref()
@@ -739,8 +762,10 @@ impl Service {
         };
         if self.state.lock().unwrap().local.displays == displays {
             self.displays_available.store(true, Ordering::SeqCst);
-            self.input_available
-                .store(self.backend.input_available(), Ordering::SeqCst);
+            self.input_available.store(
+                self.capture_started.load(Ordering::SeqCst) && self.backend.input_available(),
+                Ordering::SeqCst,
+            );
             return Ok(false);
         }
         self.displays_available.store(false, Ordering::SeqCst);
@@ -773,8 +798,10 @@ impl Service {
         drop(state);
         drop(config);
         self.displays_available.store(true, Ordering::SeqCst);
-        self.input_available
-            .store(self.backend.input_available(), Ordering::SeqCst);
+        self.input_available.store(
+            self.capture_started.load(Ordering::SeqCst) && self.backend.input_available(),
+            Ordering::SeqCst,
+        );
         self.metadata_changed.send_modify(|n| *n += 1);
         self.note("Display configuration refreshed; input returned locally".into());
         Ok(true)
@@ -793,8 +820,9 @@ impl Service {
             self.recover_session_gap();
         }
         let available = self.backend.session_available();
-        let input =
-            self.backend.input_available() && self.displays_available.load(Ordering::SeqCst);
+        let input = self.capture_started.load(Ordering::SeqCst)
+            && self.backend.input_available()
+            && self.displays_available.load(Ordering::SeqCst);
         let was_available = self.session_available.swap(available, Ordering::SeqCst);
         let had_input = self.input_available.swap(input, Ordering::SeqCst);
         if (was_available && !available) || (had_input && !input) {
@@ -1156,7 +1184,8 @@ impl Service {
         mut writer: SecureWriter,
         outgoing: bool,
     ) {
-        let (tx, mut rx) = mpsc::channel(512);
+        let tx = Arc::new(crate::outbound::Outbound::new(512));
+        let rx = tx.clone();
         let (priority, mut urgent) = mpsc::unbounded_channel();
         let epoch = Arc::new(AtomicU64::new(0));
         let generation = uuid::Uuid::new_v4().to_string();
@@ -1224,7 +1253,7 @@ impl Service {
                         other=>s.receive_control(&id,other)?,
                     }
                 },
-                message=rx.recv()=>match message{Some((sent_epoch,m))=>{if sent_epoch!=epoch.load(Ordering::SeqCst){continue;}tokio::time::timeout(Duration::from_millis(750),writer.send(&m)).await.context("Input writer stalled")??;},None=>break},
+                (sent_epoch,m)=rx.recv()=>{if sent_epoch!=epoch.load(Ordering::SeqCst){continue;}tokio::time::timeout(Duration::from_millis(750),writer.send(&m)).await.context("Input writer stalled")??;},
             }}Ok(())}.await;
             reader_task.abort();
             let needs_release = {
@@ -1269,7 +1298,6 @@ impl Service {
                 c.priority.send(message).is_ok()
             } else {
                 c.tx.try_send((c.epoch.load(Ordering::SeqCst), message))
-                    .is_ok()
             }
         })
     }
@@ -2203,6 +2231,7 @@ mod tests {
             StartOptions {
                 discovery: false,
                 protect_identity: false,
+                loopback_only: true,
             },
         )
         .await
@@ -2293,7 +2322,8 @@ mod tests {
         let service = start_test(dir.path().into(), Some(0), Arc::new(Headless::default()))
             .await
             .unwrap();
-        let (tx, mut normal) = mpsc::channel(1);
+        let tx = Arc::new(crate::outbound::Outbound::new(1));
+        let normal = tx.clone();
         let (priority, mut urgent) = mpsc::unbounded_channel();
         let epoch = Arc::new(AtomicU64::new(0));
         service.channels.lock().unwrap().insert(
@@ -2322,7 +2352,7 @@ mod tests {
         ));
         assert!(service.send("test-peer", Message::Leave));
         assert!(matches!(urgent.recv().await, Some(Message::Leave)));
-        let (queued_epoch, _) = normal.recv().await.unwrap();
+        let (queued_epoch, _) = normal.recv().await;
         assert_ne!(
             queued_epoch,
             epoch.load(Ordering::SeqCst),

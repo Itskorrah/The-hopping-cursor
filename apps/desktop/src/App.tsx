@@ -140,21 +140,34 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const snapshotRequest = useRef(0);
   const refresh = useCallback(async () => {
+    const request = ++snapshotRequest.current;
     try {
       const next = await call<Snapshot>("snapshot");
-      setData(next);
-      setFailure("");
+      if (request === snapshotRequest.current) {
+        setData(next);
+        setFailure("");
+      }
       return next;
     } catch (e) {
-      setFailure(String(e));
+      if (request === snapshotRequest.current) setFailure(String(e));
       return null;
     }
   }, []);
   useEffect(() => {
-    void refresh();
-    const interval = setInterval(() => void refresh(), 1000);
-    return () => clearInterval(interval);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      await refresh();
+      if (!stopped) timer = setTimeout(() => void poll(), 1000);
+    };
+    void poll();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      ++snapshotRequest.current;
+    };
   }, [refresh]);
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -247,7 +260,11 @@ export default function App() {
         <h1>The Hopping Cursor</h1>
         <p>{failure || "Starting your local workspace…"}</p>
         {failure && <button onClick={() => void refresh()}>Check again</button>}
-        {native && <button onClick={() => void call("quit_app")}>Quit application</button>}
+        {native && (
+          <button onClick={() => void call("quit_app")}>
+            Quit application
+          </button>
+        )}
       </div>
     );
   const connected = data.peers.filter((p) => p.connected),
@@ -257,6 +274,56 @@ export default function App() {
         : data.peers.find((p) => p.device.id === data.active_device)?.device
             .name || "Remote computer";
   const pending = data.transfers.filter((t) => t.state === "offered");
+  const inputPeers = connected.filter(
+    (p) => data.peer_permissions[p.device.id]?.input,
+  );
+  const localScreens = data.layout.filter(
+    (d) => d.device_id === data.local.id && !d.hidden,
+  );
+  const hasSharedEdge = inputPeers.some((peer) =>
+    data.layout.some(
+      (remote) =>
+        remote.device_id === peer.device.id &&
+        !remote.hidden &&
+        localScreens.some((local) => {
+          const a = local.rect,
+            b = remote.rect;
+          const vertical =
+            Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+          const horizontal =
+            Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+          return (
+            (vertical > 0 &&
+              (Math.abs(a.x + a.width - b.x) <= 2 ||
+                Math.abs(b.x + b.width - a.x) <= 2)) ||
+            (horizontal > 0 &&
+              (Math.abs(a.y + a.height - b.y) <= 2 ||
+                Math.abs(b.y + b.height - a.y) <= 2))
+          );
+        }),
+    ),
+  );
+  const readiness = data.settings.paused
+    ? "Sharing paused"
+    : !data.session_available
+      ? "Sharing suspended"
+      : !data.permissions.capture || !data.permissions.injection
+        ? "Permissions needed"
+        : data.capture_ready === false
+          ? "Input capture unavailable"
+          : data.displays_ready === false
+            ? "Display unavailable"
+            : connected.length === 0
+              ? "Connect a computer"
+              : inputPeers.length === 0
+                ? "Enable input sharing"
+                : data.settings.cursor_locked
+                  ? "Cursor locked here"
+                  : data.settings.game_mode
+                    ? "Edge handoffs disabled"
+                    : !hasSharedEdge
+                      ? "Arrange your screens"
+                      : "Workspace ready";
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -315,6 +382,14 @@ export default function App() {
             Connection help
             <ChevronRight size={14} />
           </button>
+          {native && (
+            <button
+              className="help-link"
+              onClick={() => void run(() => call("quit_app"))}
+            >
+              Quit application
+            </button>
+          )}
           <div className="version">
             The Hopping Cursor <span>v{data.version}</span>
           </div>
@@ -333,9 +408,9 @@ export default function App() {
         <header className="topbar">
           <span>
             <span
-              className={`status-dot ${data.settings.paused ? "amber" : ""}`}
+              className={`status-dot ${readiness !== "Workspace ready" ? "amber" : ""}`}
             />
-            {data.settings.paused ? "Sharing paused" : "Workspace ready"}
+            {readiness}
           </span>
           <span className="local-label">
             <OsIcon os={data.local.platform} />
@@ -421,6 +496,28 @@ export default function App() {
             </div>
           )}
           {native &&
+            data.capture_ready === false &&
+            data.permissions.capture &&
+            data.permissions.injection && (
+              <div className="notice" role="status">
+                <div>
+                  <strong>Input capture could not start</strong>
+                  <p>
+                    Retry input capture. If it still fails, quit and reopen the
+                    app. Details are in Diagnostics.
+                  </p>
+                </div>
+                <button
+                  className="button secondary"
+                  onClick={() =>
+                    void run(() => call("request_input_permissions"))
+                  }
+                >
+                  Retry input capture
+                </button>
+              </div>
+            )}
+          {native &&
             (!data.permissions.capture || !data.permissions.injection) && (
               <div className="notice">
                 <ShieldCheck size={19} />
@@ -454,18 +551,10 @@ export default function App() {
                   </div>
                   <Badge
                     tone={
-                      data.settings.paused ||
-                      !data.permissions.capture ||
-                      !data.permissions.injection
-                        ? "warning"
-                        : "success"
+                      readiness !== "Workspace ready" ? "warning" : "success"
                     }
                   >
-                    {data.settings.paused
-                      ? "Paused"
-                      : !data.permissions.capture || !data.permissions.injection
-                        ? "Permissions needed"
-                        : "Ready"}
+                    {readiness === "Workspace ready" ? "Ready" : readiness}
                   </Badge>
                 </div>
                 <div>
@@ -490,6 +579,45 @@ export default function App() {
                   </div>
                 </div>
               </div>
+              {readiness !== "Workspace ready" && (
+                <div className="notice" role="status">
+                  <div>
+                    <strong>{readiness}</strong>
+                    <p>
+                      {data.settings.paused
+                        ? "Choose Resume when you want to share input again."
+                        : !data.session_available
+                          ? "Return to the normal desktop to resume sharing."
+                          : !data.permissions.capture ||
+                              !data.permissions.injection
+                            ? "Grant input permissions on this computer and retry."
+                            : data.capture_ready === false
+                              ? "Retry input capture using the button above."
+                              : data.displays_ready === false
+                                ? "Reconnect a display. Sharing resumes when the OS reports a usable screen. Your saved arrangement is preserved."
+                                : data.settings.cursor_locked
+                                  ? "Turn off Lock cursor to the current screen in Preferences to enable edge handoffs."
+                                  : data.settings.game_mode
+                                    ? "Turn off Game mode in Preferences to enable edge handoffs."
+                                    : connected.length === 0
+                                      ? "Open the app on both computers, then connect in Computers. Paired computers reconnect automatically."
+                                      : inputPeers.length === 0
+                                        ? "Allow input sharing for your paired computer in Computers."
+                                        : !hasSharedEdge
+                                          ? "Place the screens so their edges touch, save the arrangement, and review it on the other computer."
+                                          : "Check the status above before moving your cursor to the other computer."}
+                    </p>
+                  </div>
+                  {(connected.length === 0 || inputPeers.length === 0) && (
+                    <button
+                      className="button secondary"
+                      onClick={() => setPage("computers")}
+                    >
+                      Open Computers
+                    </button>
+                  )}
+                </div>
+              )}
               <Arrangement
                 data={data}
                 save={(layout) =>
@@ -608,6 +736,28 @@ export default function App() {
                           </button>
                         ) : (
                           <>
+                            {!p.connected && p.address && (
+                              <button
+                                className="button secondary"
+                                disabled={connecting}
+                                onClick={async () => {
+                                  setConnecting(true);
+                                  try {
+                                    await run(
+                                      () =>
+                                        call("connect_address", {
+                                          address: p.address,
+                                        }),
+                                      "Computer connected",
+                                    );
+                                  } finally {
+                                    setConnecting(false);
+                                  }
+                                }}
+                              >
+                                {connecting ? "Connecting…" : "Reconnect"}
+                              </button>
+                            )}
                             <button
                               className="button secondary"
                               onClick={() => {

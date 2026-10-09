@@ -316,9 +316,38 @@ pub fn hid_to_mac(code: u16) -> Option<u16> {
     MAC_KEYS.iter().find(|(_, h)| *h == code).map(|(m, _)| *m)
 }
 
+/// Only lock/keypad classification may come from the constructed event. Fn
+/// is not carried by our HID protocol and must not leak into ordinary typing.
+#[allow(dead_code)]
+pub fn mac_remote_flags(source_flags: u64, held: impl IntoIterator<Item = u16>) -> u64 {
+    held.into_iter()
+        .fold(source_flags & ((1 << 16) | (1 << 21)), |flags, key| {
+            flags
+                | match key {
+                    224 | 228 => 1 << 18,
+                    225 | 229 => 1 << 17,
+                    226 | 230 => 1 << 19,
+                    227 | 231 => 1 << 20,
+                    _ => 0,
+                }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn remote_mac_flags_do_not_inherit_fn_or_local_modifiers() {
+        // Fn/Globe + E invokes the emoji picker. An ordinary remote E must
+        // never acquire Fn (or Command/Option) from the receiver's OS state.
+        assert_eq!(mac_remote_flags(u64::MAX, []), (1 << 16) | (1 << 21));
+        assert_eq!(mac_remote_flags(1 << 23, [225, 227]), (1 << 17) | (1 << 20));
+        assert_eq!(
+            mac_remote_flags(0, [224, 228, 226, 230]),
+            (1 << 18) | (1 << 19)
+        );
+        assert_eq!(mac_remote_flags(0, []), 0);
+    }
     #[test]
     fn physical_scan_wins_over_source_layout() {
         assert_eq!(windows_to_hid(0x41, 16, false), Some(20));

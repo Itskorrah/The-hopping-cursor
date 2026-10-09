@@ -10,6 +10,8 @@ const display = (id: string, width: number, height: number) => ({
   primary: true,
 });
 const sample: Snapshot = {
+  capture_ready: true,
+  displays_ready: true,
   local: {
     id: "local-preview",
     name: "Studio Mac",
@@ -103,7 +105,7 @@ const sample: Snapshot = {
   diagnostics: [
     "Interface preview loaded. No native input, network, or file sharing is running.",
   ],
-  version: "0.1.2",
+  version: "0.1.3",
   session_available: true,
 };
 let preview: Snapshot;

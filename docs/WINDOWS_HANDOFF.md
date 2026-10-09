@@ -1,5 +1,27 @@
 # Windows development handoff — 2026-10-10
 
+## Latest Windows checkpoint — 0.1.3
+
+The Windows pass is documented in [TEST_0.1.3.md](TEST_0.1.3.md). The original
+0.1.2 handoff below remains historical context. Find Skills is now installed
+with provenance and license in `.agents/skills/find-skills`.
+
+Native Windows builds work on this PC with a portable LLVM/MSVC SDK toolchain;
+dot-source `scripts/use-windows-portable-toolchain.ps1` in a new PowerShell session.
+The native pointer-parking probe and isolated encrypted integration tests pass.
+Core code checks for both Mac targets; this does not validate Mac execution.
+
+BUG-018's inherited Fn path is mitigated, BUG-019's Windows raw-count path and
+motion backlog are changed, and BUG-020 now has actual capture readiness plus
+clearer setup status. Keep all three awaiting physical acceptance. The user
+clarified that BUG-020 was a general clunky impression; no exact repeated-action
+sequence or underlying connection fault was established.
+
+The Mac needs these source changes rebuilt using its existing stable local
+signing override, then the physical keyboard/mouse checklist. Preserve pairing,
+identities, settings and explicit arrangement acceptance. Protocol remains 2;
+0.1.2 peers remain compatible, but the Mac key fix requires the updated receiver.
+
 Continue the existing native desktop KVM. This is the **0.1.2 development alpha**
 checkpoint being consolidated into `main`, not a production release. Do not
 rebuild it as a website. Inspect the checkout and remote before editing; newer

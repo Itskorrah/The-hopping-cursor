@@ -235,8 +235,9 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
 - Expected: letter E/e. Actual: emoji picker. Other typing and bidirectional
   handoff work. Mac injection preserves function flags; Fn/Globe+E is an OS
   shortcut. Unwanted Fn state is a hypothesis, not a confirmed root cause.
-- Status: open, handed to Windows with Mac receiver checks and synthetic-event
-  regression required. Do not log actual physical key contents.
+- 0.1.3: inherited Fn/Globe and receiver modifiers are stripped; synthetic flag
+  regression passes and core checks for both Mac targets. Status: mitigated,
+  pending rebuilt Mac receiver and physical E/shortcut acceptance. Do not log keys.
 
 ### BUG-019: Windows mouse movement on Mac feels clunky
 
@@ -246,19 +247,28 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
 - Expected: consistent precise movement. Actual: uneven feel on Windows source.
 - To check: raw-count DPI/gain, logical/physical scaling, cadence, queues and
   injection. Do not treat sensitivity or smoothing as an established fix.
-- Status: open; native Windows investigation and physical comparative acceptance
-  pending. Preserve the successful Mac-source path.
+- 0.1.3: remote Windows motion uses native processed screen displacement from
+  a monitor-center parking anchor. Raw Input retains local edge detection.
+  Consecutive pending positions coalesce without crossing discrete barriers.
+  The 8,000-event encrypted burst fails on the original queue and passes here;
+  real Windows hook/parking/restoration probe passes. Status: changed and
+  regression-tested; directional feel, source visibility and drags still require
+  physical acceptance. Mac source motion is unchanged.
 
-### BUG-020: Initial sharing needs repeated connection/pause actions
+### BUG-020: Sharing setup feels clunky and readiness is unclear
 
-- Severity: S3; reported workaround is reconnect plus Pause/Resume.
-- Evidence: user on 0.1.2 used Connect, disconnect/reconnect and Workspace
-  Pause/Resume before both directions worked; exact transition not reproduced.
+- Severity: S3; user clarified that this was a general clunky impression.
+- Evidence: exact action sequence/connection fault is not established. Windows
+  native 0.1.2 was observed saying Workspace ready with zero connected computers.
 - Expected: approved, correctly arranged peers become ready predictably and show
   the exact blocker if sharing is paused, not paired or lacks permissions.
 - Actual: readiness was unclear and needed experimentation.
-- Status: open. Observe startup/reconnect state before changing it; never silently
-  resume a deliberate pause or bypass pairing/layout consent.
+- 0.1.3: explicit capture-start state cannot be resurrected by refresh after a
+  failed hook installation. Capture retry, setup blocker status, serialized
+  polling/stale-response protection and in-window Quit were added. Failed-start
+  recovery and browser blocker tests pass. Status: concrete readiness issues
+  fixed; complete physical startup/reconnect acceptance pending. Deliberate pause
+  and pairing/layout consent remain explicit.
 
 ### BUG-021: README preview leaves white space below the sidebar
 
