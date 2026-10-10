@@ -92,6 +92,21 @@ export interface Snapshot {
   capture_ready: boolean;
   displays_ready: boolean;
   suppressed_events?: number | null;
+  scroll_diagnostics?: {
+    captured: number;
+    forwarded: number;
+    received: number;
+    applied: number;
+    rejected: number;
+    natural_scrolling: boolean | null;
+  };
+  control_queues?: {
+    pending: number;
+    peak_pending: number;
+    coalesced_moves: number;
+    full_rejections: number;
+    longest_wait_us: number;
+  };
   keyboard_diagnostics?: {
     captured: number;
     forwarded: number;

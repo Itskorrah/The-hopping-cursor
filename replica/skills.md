@@ -43,3 +43,14 @@ Applied platform fonts/chrome/cursor and status clarity guidance. Its architectu
 opinions are not grounds to replace this existing Tauri/Rust application. Native
 motion, clipboard and drag choices were checked against Microsoft/Apple docs.
 No skill establishes physical input behavior or release readiness.
+
+
+2026-10-10 / 0.1.5: applied the Find Skills discovery from the planning pass and
+installed `obra/superpowers@systematic-debugging`, plus its recommended TDD and
+verification-before-completion companions through the skills CLI for Codex.
+Read all three before applying them. Root-cause/failed-before evidence guided
+native scroll fixes; verification separated Windows runtime, Mac compilation,
+synthetic stress and physical acceptance. Each local skill includes the upstream
+MIT license (Copyright 2025 Jesse Vincent); skills-lock.json retains content hashes.
+Source: https://github.com/obra/superpowers. No bundled shell helpers were executed.
+No skill establishes native correctness or mandates a new product architecture.

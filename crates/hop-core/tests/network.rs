@@ -54,6 +54,89 @@ async fn pair(auto_accept: bool) -> Pair {
 }
 
 #[tokio::test]
+async fn first_scroll_and_fractional_mixed_input_reach_only_the_remote_owner_in_order() {
+    let p = pair(true).await;
+    for (source, target, local_backend, remote_backend) in
+        [(&p.a, &p.b, &p.pa, &p.pb), (&p.b, &p.a, &p.pb, &p.pa)]
+    {
+        let source_before = source.snapshot().scroll_diagnostics;
+        let target_before = target.snapshot().scroll_diagnostics;
+        let destination = target.snapshot().local;
+        local_backend.events.lock().unwrap().clear();
+        remote_backend.events.lock().unwrap().clear();
+        source
+            .jump_to_display(&destination.id, &destination.displays[0].id)
+            .unwrap();
+        let expected = vec![
+            InputEvent::Scroll { x: 0., y: 0.125 },
+            InputEvent::Button {
+                button: 0,
+                down: true,
+            },
+            InputEvent::Scroll { x: -0.25, y: 0. },
+            InputEvent::Key {
+                code: 8,
+                down: true,
+            },
+            InputEvent::Scroll { x: 0.5, y: -0.5 },
+            InputEvent::Key {
+                code: 8,
+                down: false,
+            },
+            InputEvent::Button {
+                button: 0,
+                down: false,
+            },
+        ];
+        // Deliberately no receiver acknowledgement before the first wheel.
+        for event in &expected {
+            assert!(source.capture(CapturedEvent::Input(event.clone())));
+        }
+        wait(|| {
+            remote_backend
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| !matches!(e, InputEvent::Move { .. } | InputEvent::ReleaseAll))
+                .count()
+                == expected.len()
+        })
+        .await;
+        assert_eq!(
+            remote_backend
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| !matches!(e, InputEvent::Move { .. } | InputEvent::ReleaseAll))
+                .cloned()
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert!(!local_backend
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, InputEvent::Scroll { .. })));
+        let source_after = source.snapshot().scroll_diagnostics;
+        let target_after = target.snapshot().scroll_diagnostics;
+        assert_eq!(source_after.captured - source_before.captured, 3);
+        assert_eq!(source_after.forwarded - source_before.forwarded, 3);
+        assert_eq!(target_after.received - target_before.received, 3);
+        assert_eq!(target_after.applied - target_before.applied, 3);
+        assert_eq!(target_after.rejected, target_before.rejected);
+        let exported: serde_json::Value =
+            serde_json::from_str(&target.export_diagnostics()).unwrap();
+        assert_eq!(exported["scroll"]["applied"], target_after.applied);
+        assert!(exported["control_queues"]["pending"].is_number());
+        source.release();
+        wait(|| target.snapshot().active_device == source.snapshot().local.id).await;
+    }
+}
+
+#[tokio::test]
 async fn first_keyboard_packet_after_handoff_and_shared_keyboard_reaches_the_cursor_owner() {
     let p = pair(true).await;
     let local = p.a.snapshot().local;

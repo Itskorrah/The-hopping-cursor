@@ -145,11 +145,157 @@ fn decode_plain(plain: &[u8]) -> Result<Message> {
     Ok(message)
 }
 
+/// Exercise only bounded decrypted input; this feature is absent from release builds.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn fuzz_plaintext(bytes: &[u8]) {
+    if bytes.len() > MAX_FRAME - 16 {
+        return;
+    }
+    if let Ok(message) = decode_plain(bytes) {
+        if let Message::Input(event) = &message {
+            let _ = event.validate();
+        }
+        if let Message::Hello { device, .. } = &message {
+            for display in &device.displays {
+                let _ = display.bounds.valid();
+            }
+        }
+        let encoded = postcard::to_allocvec(&message).expect("Decoded message must serialize");
+        assert!(encoded.len() <= bytes.len());
+        assert!(decode_plain(&encoded).is_ok());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config;
     use tokio::net::TcpListener;
+    /// Portable mutation smoke test for hosts without libFuzzer/ASan. This is
+    /// deterministic and bounded, not coverage-guided or a sanitizer substitute.
+    #[cfg(feature = "fuzzing")]
+    #[test]
+    #[ignore = "Opt-in bounded parser mutation campaign; uses synthetic data only"]
+    fn bounded_plaintext_mutation_campaign() {
+        use crate::model::{BlobKind, Device, Display, InputEvent, Rect};
+        let messages = [
+            Message::Hello {
+                version: 2,
+                device: Device {
+                    id: "a".repeat(32),
+                    name: "Synthetic".into(),
+                    platform: "headless".into(),
+                    displays: vec![Display {
+                        id: "synthetic-display".into(),
+                        name: "Test".into(),
+                        bounds: Rect {
+                            x: 0.,
+                            y: 0.,
+                            width: 1920.,
+                            height: 1080.,
+                        },
+                        scale: 1.,
+                        primary: true,
+                    }],
+                },
+                purpose: "control".into(),
+                port: 24810,
+                approved: false,
+            },
+            Message::Leave,
+            Message::Input(InputEvent::Scroll { x: 0.125, y: -0.25 }),
+            Message::Input(InputEvent::Key {
+                code: 4,
+                down: true,
+            }),
+            Message::Enter {
+                display_id: "synthetic-display".into(),
+                x: 960.,
+                y: 540.,
+            },
+            Message::CursorFocus {
+                device_id: "a".repeat(32),
+            },
+            Message::BlobStart {
+                id: "synthetic".into(),
+                kind: BlobKind::File,
+                name: "test.bin".into(),
+                size: 32768,
+                hash: "0".repeat(64),
+            },
+            Message::BlobChunk {
+                id: "synthetic".into(),
+                offset: 0,
+                data: vec![0x5a; CHUNK_SIZE],
+            },
+        ];
+        let mut seeds: Vec<Vec<u8>> = messages
+            .iter()
+            .map(|message| postcard::to_allocvec(message).unwrap())
+            .collect();
+        seeds.push(include_bytes!("../tests/fixtures/malformed-display-count.bin").to_vec());
+        for seed in &seeds {
+            fuzz_plaintext(seed);
+        }
+        let cases = std::env::var("HOP_MUTATION_CASES")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1_000_000)
+            .clamp(1000, 10_000_000);
+        let started = std::time::Instant::now();
+        let mut state = 0x484f_5053_4352_4f4c_u64;
+        let mut random = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut bytes = Vec::with_capacity(MAX_FRAME - 16);
+        for case in 0..cases {
+            bytes.clear();
+            bytes.extend_from_slice(&seeds[case as usize % seeds.len()]);
+            match case % 6 {
+                0 => {
+                    bytes.push(random() as u8);
+                }
+                1 => {
+                    bytes.truncate(random() as usize % (bytes.len() + 1));
+                }
+                2 => {
+                    for _ in 0..(random() % 8 + 1) {
+                        let index = random() as usize % bytes.len();
+                        bytes[index] ^= 1 << (random() % 8);
+                    }
+                }
+                3 => {
+                    let length = random() as usize % 512;
+                    bytes.clear();
+                    bytes.extend((0..length).map(|_| random() as u8));
+                }
+                4 => {
+                    for byte in bytes.iter_mut().take(12) {
+                        *byte = if random().is_multiple_of(2) {
+                            0xff
+                        } else {
+                            0x80
+                        };
+                    }
+                }
+                _ => {
+                    let length = if case.is_multiple_of(1025) {
+                        MAX_FRAME - 16
+                    } else {
+                        random() as usize % 512
+                    };
+                    bytes.resize(length, random() as u8);
+                }
+            }
+            assert!(bytes.len() <= MAX_FRAME - 16);
+            fuzz_plaintext(&bytes);
+        }
+        println!("MUTATION_RESULT cases={cases} seconds={:.3} max_input_bytes={} seed=0x484f505343524f4c scope=deterministic_synthetic_parser_no_sanitizer",started.elapsed().as_secs_f64(),MAX_FRAME-16);
+    }
     #[test]
     fn rejects_malformed_and_trailing_plaintext() {
         assert!(decode_plain(&[]).is_err());
@@ -252,27 +398,5 @@ mod tests {
         let mut client = TcpStream::connect(addr).await.unwrap();
         client.write_u16(0).await.unwrap();
         task.await.unwrap();
-    }
-}
-
-/// Exercise only bounded decrypted input; this feature is absent from release builds.
-#[cfg(feature = "fuzzing")]
-#[doc(hidden)]
-pub fn fuzz_plaintext(bytes: &[u8]) {
-    if bytes.len() > MAX_FRAME - 16 {
-        return;
-    }
-    if let Ok(message) = decode_plain(bytes) {
-        if let Message::Input(event) = &message {
-            let _ = event.validate();
-        }
-        if let Message::Hello { device, .. } = &message {
-            for display in &device.displays {
-                let _ = display.bounds.valid();
-            }
-        }
-        let encoded = postcard::to_allocvec(&message).expect("Decoded message must serialize");
-        assert!(encoded.len() <= bytes.len());
-        assert!(decode_plain(&encoded).is_ok());
     }
 }

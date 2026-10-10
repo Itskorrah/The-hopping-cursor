@@ -1,4 +1,4 @@
-use super::{keys, CaptureCallback, Platform};
+use super::{keys, scroll, CaptureCallback, Platform};
 use crate::model::*;
 use anyhow::{Context, Result};
 use std::{
@@ -43,6 +43,7 @@ pub struct Windows {
     keyboard_thread: Mutex<Option<JoinHandle<()>>>,
     held: Mutex<BTreeSet<u16>>,
     buttons: Mutex<BTreeSet<u8>>,
+    scroll: Mutex<scroll::WindowsScroll>,
     suppressed: Arc<AtomicU64>,
 }
 impl Windows {
@@ -61,6 +62,7 @@ impl Windows {
             keyboard_thread: Mutex::new(None),
             held: Mutex::new(BTreeSet::new()),
             buttons: Mutex::new(BTreeSet::new()),
+            scroll: Mutex::new(scroll::WindowsScroll::default()),
             suppressed: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -581,6 +583,7 @@ impl Platform for Windows {
     }
     fn inject(&self, event: &InputEvent) -> Result<()> {
         if *event == InputEvent::ReleaseAll {
+            self.scroll.lock().unwrap().reset();
             let held: Vec<_> = self.held.lock().unwrap().iter().copied().collect();
             for code in held {
                 self.inject(&InputEvent::Key { code, down: false })?;
@@ -653,15 +656,16 @@ impl Platform for Windows {
                 };
             }
             InputEvent::Scroll { x, y } => {
-                for (amount, flag) in [(*x, MOUSEEVENTF_HWHEEL), (*y, MOUSEEVENTF_WHEEL)] {
-                    if amount != 0. {
+                let [x, y] = self.scroll.lock().unwrap().prepare(*x, *y);
+                for (amount, flag) in [(x, MOUSEEVENTF_HWHEEL), (y, MOUSEEVENTF_WHEEL)] {
+                    if amount != 0 {
                         let i = INPUT {
                             r#type: INPUT_MOUSE,
                             Anonymous: INPUT_0 {
                                 mi: MOUSEINPUT {
                                     dx: 0,
                                     dy: 0,
-                                    mouseData: (amount * 120.) as i32 as u32,
+                                    mouseData: amount as u32,
                                     dwFlags: flag,
                                     time: 0,
                                     dwExtraInfo: 0,
@@ -770,6 +774,60 @@ pub fn read_html() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "Isolated native wheel-hook probe; quit sharing engines and run serially"]
+    fn scroll_hook_preserves_signed_sub_notch_axes_and_filters_injection() {
+        let native = Windows::new();
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let events = observed.clone();
+        native
+            .start_capture(Arc::new(move |event| {
+                if let CapturedEvent::Input(InputEvent::Scroll { x, y }) = event {
+                    events.lock().unwrap().push(InputEvent::Scroll { x, y });
+                }
+                true
+            }))
+            .unwrap();
+        let mut expected = Vec::new();
+        let mut consumed = Vec::new();
+        for message in [WM_MOUSEWHEEL, WM_MOUSEHWHEEL] {
+            for amount in [-120_i16, -15, -1, 1, 15, 120] {
+                let mut packet = MSLLHOOKSTRUCT {
+                    pt: POINT { x: 0, y: 0 },
+                    mouseData: (u32::from(amount as u16) << 16) | 0xbeef,
+                    flags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+                consumed.push(unsafe {
+                    mouse_hook(0, message as WPARAM, &packet as *const _ as LPARAM)
+                });
+                expected.push(if message == WM_MOUSEWHEEL {
+                    InputEvent::Scroll {
+                        x: 0.,
+                        y: f64::from(amount) / 120.,
+                    }
+                } else {
+                    InputEvent::Scroll {
+                        x: f64::from(amount) / 120.,
+                        y: 0.,
+                    }
+                });
+                packet.flags = LLMHF_INJECTED;
+                unsafe {
+                    mouse_hook(0, message as WPARAM, &packet as *const _ as LPARAM);
+                }
+            }
+        }
+        native.stop_capture();
+        assert_eq!(*observed.lock().unwrap(), expected);
+        assert!(
+            consumed.iter().all(|value| *value == 1),
+            "Forwarded wheel must be consumed locally"
+        );
+        println!("Native wheel-hook probe: 12 signed wheel packets consumed, 12 injected duplicates filtered (synthetic hook packets, not physical mouse acceptance).");
+    }
 
     #[test]
     #[ignore = "Interactive isolated hook-pressure probe; quit sharing engines and run serially"]

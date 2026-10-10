@@ -258,6 +258,8 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
   aggregate capture/forward/receive/apply diagnostics. Failing-before/passing-after
   regressions, four native probes and repeated encrypted handoffs pass.
 - Status: confirmed local weaknesses fixed; **physical BUG-022 acceptance pending**.
+- Subsequent owner feedback: a short 0.1.4 test works and feels good. The controlled
+  source-context comparison and extended physical testing remain incomplete.
   See docs/TEST_0.1.4.md. No forced source focus or injection-filter relaxation.
 
 ### BUG-019: Windows mouse movement on Mac feels clunky
@@ -300,3 +302,25 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
 - Fix: replace docs/images/workspace.jpg with an unedited native Mac 0.1.2 window
   screenshot, and label its source/date in README. No CSS or input code changed.
 - Status: visually verified on 2026-10-10; documentation fix in this handoff commit.
+
+
+### BUG-023: Windows mouse does not scroll on the Mac
+
+- Severity: S2; owner feedback after brief positive sharing tests.
+- Expected: vertical/horizontal wheel input works with Mac Natural scrolling
+  either on or off, using the destination setting, without scrolling the source.
+- Confirmed code defects: Mac FFI omitted the fixed first wheel argument;
+  per-packet casts discarded fractional amounts. Mac capture also used integer
+  fields and there was no explicit destination scroll-policy conversion.
+- 0.1.5: correct fixed/variadic ABI; fractional fixed/line/point representation;
+  source normalization and cached receiving Mac preference; Windows sub-unit
+  accumulation; remainder cleanup; aggregate scroll and queue diagnostics.
+- Evidence: previous ABI declaration fails a typed compile regression; legacy
+  conversions fail fractional/sign regressions. Current portable tests and Mac
+  compile checks pass. A Windows native hook probe preserves signed sub-notch
+  packets, consumes forwarding and rejects injected duplicates. Encrypted
+  first-wheel/mixed-input ordering passes in both directions.
+- Status: confirmed local defects corrected; physical Mac scrolling and native
+  constructor execution pending. Update the Mac receiver to 0.1.5; the Windows
+  installer alone cannot update it. See docs/TEST_0.1.5.md. No speculative smoothing,
+  OS preference writes, focus workarounds or filter relaxation were added.

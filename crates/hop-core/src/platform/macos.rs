@@ -1,11 +1,11 @@
-use super::{keys, CaptureCallback, Platform};
+use super::{keys, scroll, CaptureCallback, Platform};
 use crate::model::*;
 use anyhow::{Context, Result};
 use std::{
     collections::BTreeSet,
     ffi::c_void,
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     thread::JoinHandle,
@@ -45,6 +45,73 @@ fn display_id(id: u32) -> String {
     }
 }
 const MARKER: i64 = 0x484f505043555253;
+
+fn read_natural_scroll() -> bool {
+    unsafe {
+        // Read the user's global policy without changing OS preferences.
+        CFPreferencesSynchronize(
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost,
+        );
+        let key = CFStringCreateWithCString(
+            std::ptr::null_mut(),
+            c"com.apple.swipescrolldirection".as_ptr(),
+            0x08000100,
+        );
+        if key.is_null() {
+            return true;
+        }
+        let value = CFPreferencesCopyValue(
+            key,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost,
+        );
+        CFRelease(key);
+        if value.is_null() {
+            return true;
+        } // macOS's natural-scrolling default
+        let natural = if CFGetTypeID(value) == CFBooleanGetTypeID() {
+            CFBooleanGetValue(value)
+        } else {
+            true
+        };
+        CFRelease(value);
+        natural
+    }
+}
+
+fn create_scroll_event(
+    source: Ref,
+    x: f64,
+    y: f64,
+    natural: bool,
+    scroll: &mut scroll::MacScroll,
+) -> Result<Ref> {
+    unsafe {
+        let current = CGEventCreate(std::ptr::null_mut());
+        anyhow::ensure!(!current.is_null(), "Cannot locate destination cursor");
+        let location = CGEventGetLocation(current);
+        CFRelease(current);
+        // Initialize one native line on each axis to obtain Quartz's own
+        // line-to-point scale, then replace all delta fields consistently.
+        let event = CGEventCreateScrollWheelEvent(source, 1, 2, 1_i32, 1_i32);
+        anyhow::ensure!(!event.is_null(), "Cannot create macOS scroll event");
+        let scale = CGEventGetIntegerValueField(event, 96).unsigned_abs() as f64;
+        let delta = scroll.prepare(x, y, natural, if scale > 0. { scale } else { 8. });
+        // Setting integer line fields can also alter fixed/point fields.
+        // Set fractional and point values afterwards, preserving small wheels.
+        CGEventSetIntegerValueField(event, 11, delta.lines[1] as i64);
+        CGEventSetIntegerValueField(event, 12, delta.lines[0] as i64);
+        CGEventSetDoubleValueField(event, 93, delta.fixed[1]);
+        CGEventSetDoubleValueField(event, 94, delta.fixed[0]);
+        CGEventSetIntegerValueField(event, 96, delta.points[1]);
+        CGEventSetIntegerValueField(event, 97, delta.points[0]);
+        CGEventSetLocation(event, location);
+        Ok(event)
+    }
+}
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGEventTapCreate(
@@ -59,12 +126,17 @@ extern "C" {
     fn CGEventGetLocation(event: Ref) -> Point;
     fn CGEventGetIntegerValueField(event: Ref, field: u32) -> i64;
     fn CGEventSetIntegerValueField(event: Ref, field: u32, value: i64);
+    fn CGEventGetDoubleValueField(event: Ref, field: u32) -> f64;
+    fn CGEventSetDoubleValueField(event: Ref, field: u32, value: f64);
+    fn CGEventSetLocation(event: Ref, point: Point);
     fn CGEventGetFlags(event: Ref) -> u64;
     fn CGEventSetFlags(event: Ref, flags: u64);
     fn CGEventCreate(source: Ref) -> Ref;
     fn CGEventCreateKeyboardEvent(source: Ref, key: u16, down: bool) -> Ref;
     fn CGEventCreateMouseEvent(source: Ref, kind: u32, point: Point, button: u32) -> Ref;
-    fn CGEventCreateScrollWheelEvent(source: Ref, units: u32, count: u32, ...) -> Ref;
+    // wheel1 is fixed, not variadic. On arm64 Darwin fixed arguments use
+    // registers while the remaining variadic wheels are passed on the stack.
+    fn CGEventCreateScrollWheelEvent(source: Ref, units: u32, count: u32, wheel1: i32, ...) -> Ref;
     fn CGEventPost(tap: u32, event: Ref);
     fn CGWarpMouseCursorPosition(point: Point) -> i32;
     fn CGDisplayHideCursor(display: u32) -> i32;
@@ -100,6 +172,12 @@ extern "C" {
     fn CFRunLoopStop(runloop: Ref);
     fn CFRelease(value: Ref);
     fn CFUUIDGetUUIDBytes(value: Ref) -> UuidBytes;
+    fn CFStringCreateWithCString(allocator: Ref, value: *const i8, encoding: u32) -> Ref;
+    fn CFPreferencesCopyValue(key: Ref, application: Ref, user: Ref, host: Ref) -> Ref;
+    fn CFPreferencesSynchronize(application: Ref, user: Ref, host: Ref) -> bool;
+    fn CFGetTypeID(value: Ref) -> usize;
+    fn CFBooleanGetTypeID() -> usize;
+    fn CFBooleanGetValue(value: Ref) -> bool;
     fn CFDictionaryCreate(
         allocator: Ref,
         keys: *const Ref,
@@ -110,6 +188,9 @@ extern "C" {
     ) -> Ref;
     static kCFBooleanTrue: Ref;
     static kCFRunLoopCommonModes: Ref;
+    static kCFPreferencesAnyApplication: Ref;
+    static kCFPreferencesCurrentUser: Ref;
+    static kCFPreferencesAnyHost: Ref;
 }
 #[link(name = "Carbon", kind = "framework")]
 extern "C" {
@@ -121,6 +202,7 @@ struct TapContext {
     modifiers: BTreeSet<u16>,
     parked: Arc<Mutex<Option<Point>>>,
     suppressed: Arc<AtomicU64>,
+    natural_scroll: Arc<AtomicBool>,
 }
 extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
     unsafe {
@@ -152,10 +234,23 @@ extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
                 },
                 down: matches!(kind, 1 | 3 | 25),
             })),
-            22 => Some(CapturedEvent::Input(InputEvent::Scroll {
-                x: CGEventGetIntegerValueField(event, 12) as f64,
-                y: CGEventGetIntegerValueField(event, 11) as f64,
-            })),
+            22 => {
+                let (x, y) = if CGEventGetIntegerValueField(event, 88) != 0 {
+                    // Continuous events carry points; retain sub-line motion.
+                    (
+                        CGEventGetIntegerValueField(event, 97) as f64 / 8.,
+                        CGEventGetIntegerValueField(event, 96) as f64 / 8.,
+                    )
+                } else {
+                    (
+                        CGEventGetDoubleValueField(event, 94),
+                        CGEventGetDoubleValueField(event, 93),
+                    )
+                };
+                let [x, y] =
+                    scroll::mac_direction(x, y, ctx.natural_scroll.load(Ordering::Relaxed));
+                Some(CapturedEvent::Input(InputEvent::Scroll { x, y }))
+            }
             10 | 11 => keys::mac_to_hid(CGEventGetIntegerValueField(event, 9) as u16).map(|code| {
                 CapturedEvent::Input(InputEvent::Key {
                     code,
@@ -207,6 +302,8 @@ pub struct Mac {
     parked: Arc<Mutex<Option<Point>>>,
     source: Mutex<usize>,
     suppressed: Arc<AtomicU64>,
+    natural_scroll: Arc<AtomicBool>,
+    scroll: Mutex<scroll::MacScroll>,
 }
 impl Mac {
     pub fn new() -> Self {
@@ -218,14 +315,23 @@ impl Mac {
             parked: Arc::new(Mutex::new(None)),
             source: Mutex::new(0),
             suppressed: Arc::new(AtomicU64::new(0)),
+            natural_scroll: Arc::new(AtomicBool::new(read_natural_scroll())),
+            scroll: Mutex::new(scroll::MacScroll::default()),
         }
     }
 }
 impl Platform for Mac {
+    fn natural_scrolling(&self) -> Option<bool> {
+        Some(self.natural_scroll.load(Ordering::Relaxed))
+    }
     fn name(&self) -> &str {
         "macos"
     }
     fn displays(&self) -> Result<Vec<Display>> {
+        // The display refresh runs off the input callback every two seconds.
+        // Preference changes are read here; never touch defaults on the hot path.
+        self.natural_scroll
+            .store(read_natural_scroll(), Ordering::Relaxed);
         unsafe {
             let mut ids = [0; 32];
             let mut count = 0;
@@ -311,6 +417,7 @@ impl Platform for Mac {
         let (tx, rx) = std::sync::mpsc::channel();
         let parked = self.parked.clone();
         let suppressed = self.suppressed.clone();
+        let natural_scroll = self.natural_scroll.clone();
         let handle = std::thread::spawn(move || unsafe {
             let ctx = Box::new(TapContext {
                 callback: cb,
@@ -318,6 +425,7 @@ impl Platform for Mac {
                 modifiers: BTreeSet::new(),
                 parked,
                 suppressed,
+                natural_scroll,
             });
             let ptr = Box::into_raw(ctx);
             let mask = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 22, 25, 26, 27]
@@ -391,6 +499,7 @@ impl Platform for Mac {
     }
     fn inject(&self, event: &InputEvent) -> Result<()> {
         if *event == InputEvent::ReleaseAll {
+            self.scroll.lock().unwrap().reset();
             let held: Vec<_> = self.held.lock().unwrap().iter().copied().collect();
             for code in held {
                 self.inject(&InputEvent::Key { code, down: false })?;
@@ -434,6 +543,7 @@ impl Platform for Mac {
                 }
                 InputEvent::Button { button, down } => {
                     let current = CGEventCreate(std::ptr::null_mut());
+                    anyhow::ensure!(!current.is_null(), "Cannot locate destination cursor");
                     let p = CGEventGetLocation(current);
                     CFRelease(current);
                     let kind = match (*button, *down) {
@@ -446,9 +556,13 @@ impl Platform for Mac {
                     };
                     CGEventCreateMouseEvent(source, kind, p, *button as u32)
                 }
-                InputEvent::Scroll { x, y } => {
-                    CGEventCreateScrollWheelEvent(source, 1, 2, *y as i32, *x as i32)
-                }
+                InputEvent::Scroll { x, y } => create_scroll_event(
+                    source,
+                    *x,
+                    *y,
+                    self.natural_scroll.load(Ordering::Relaxed),
+                    &mut self.scroll.lock().unwrap(),
+                )?,
                 InputEvent::ReleaseAll => unreachable!(),
             };
             anyhow::ensure!(!e.is_null(), "macOS event creation failed");
@@ -585,6 +699,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn quartz_scroll_constructor_uses_fixed_primary_wheel_argument() {
+        // Apple's C ABI has four fixed arguments; only wheels 2/3 are variadic.
+        // Apple Silicon passes fixed and variadic arguments differently.
+        let create: unsafe extern "C" fn(Ref, u32, u32, i32, ...) -> Ref =
+            CGEventCreateScrollWheelEvent;
+        unsafe {
+            let event = create(std::ptr::null_mut(), 1, 2, 3_i32, -2_i32);
+            assert!(!event.is_null());
+            assert_eq!(CGEventGetIntegerValueField(event, 11), 3);
+            assert_eq!(CGEventGetIntegerValueField(event, 12), -2);
+            CFRelease(event);
+        }
+    }
+
+    #[test]
+    fn mac_scroll_event_preserves_fractional_axes_and_destination_direction_without_posting() {
+        unsafe {
+            let mut scroll = scroll::MacScroll::default();
+            for (natural, x, y) in [(false, -0.125, 0.5), (true, 0.125, -0.5)] {
+                let event =
+                    create_scroll_event(std::ptr::null_mut(), 0.125, 0.5, natural, &mut scroll)
+                        .unwrap();
+                assert!((CGEventGetDoubleValueField(event, 94) - x).abs() < 1. / 65536.);
+                assert!((CGEventGetDoubleValueField(event, 93) - y).abs() < 1. / 65536.);
+                assert_eq!(CGEventGetIntegerValueField(event, 88), 0);
+                CFRelease(event);
+            }
+        }
+    }
+
+    #[test]
     fn mac_active_filter_discards_clicks_and_unmapped_keys_without_posting_events() {
         // Construct isolated events and call the filter directly. Never post
         // test input into the user's session or request native permissions.
@@ -599,6 +744,7 @@ mod tests {
                 modifiers: BTreeSet::new(),
                 parked: Arc::new(Mutex::new(None)),
                 suppressed: Arc::new(AtomicU64::new(0)),
+                natural_scroll: Arc::new(AtomicBool::new(false)),
             };
             for (kind, event) in [(3, click), (10, unmapped)] {
                 assert!(!event.is_null());

@@ -128,3 +128,20 @@ clipboard. Newer batches supersede older pending ones. Temporary partial files
 retain cleanup; completed downloads remain normal received files. This implements
 copy only, never source deletion or shell move feedback. Physical Finder/Explorer,
 OS clipboard races and independent security review remain acceptance work.
+
+
+## 0.1.5 verification — 2026-10-10
+
+Fresh npm and Cargo audit commands report zero listed vulnerability entries.
+The same three upstream maintenance/unsoundness warnings above remain recorded,
+with no global suppression. The application dependency versions are unchanged.
+One million deterministic bounded synthetic parser mutations pass on Windows;
+this fallback uses no AddressSanitizer or coverage guidance and does not replace
+the historical Mac/Linux sanitizer campaigns or an independent security audit.
+
+Scroll diagnostics export counts and local scroll policy only. Queue telemetry
+contains aggregate sizes/coalescing/rejections/maximum residence, with no message
+payload or event history. Current-connection queue statistics reset on replacement;
+scroll stage counts reset on process restart. Injected filters, owner/permission
+validation, pinned encryption, file consent and emergency priority remain intact.
+See TEST_0.1.5.md for scope, repeat commands and physical acceptance limits.

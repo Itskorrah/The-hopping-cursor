@@ -123,3 +123,13 @@ full-height sidebar and no image editing. Record user-confirmed basic two-way
 control plus open E/emoji, Windows-source feel and setup defects. Prepare
 docs/WINDOWS_HANDOFF.md and consolidate the owner-authorized alpha checkpoint
 into main. No protocol/native/UI implementation or installer changes in this pass.
+
+
+2026-10-10 / 0.1.5: owner briefly reports good behavior and feel, followed by a
+Windows-mouse-to-Mac scroll failure. Correct the fixed first Quartz wheel argument,
+retain fractions on both adapters and normalize/apply Mac scroll policy outside
+the tap's preference I/O path. Add content-free scroll/queue diagnostics,
+regressions and opt-in encrypted reliability/parser fixtures. Native Windows
+NSIS builds and strict checks pass; updated evidence and actual installation
+state are in docs/TEST_0.1.5.md. Mac runtime and extended physical acceptance remain
+open. Reviewed debugging/TDD/verification skills retain upstream MIT licenses.

@@ -23,11 +23,13 @@ Secure desktop control,input,could,yes,no,Windows service privilege work pending
 Commercial lifetime licensing,business,could,yes,skip,User-owned local alpha; commercial licensing deferred
 Signed installers,distribution,should,partial,no,Mac ad hoc bundle integrity; Developer ID/AuthentiCode certificates and notarization not configured
 Windows and macOS builds,distribution,must,yes,yes,Windows x64 NSIS and Intel/Apple Silicon DMG builds succeeded on native CI runners
-Privacy-preserving diagnostics,diagnostics,should,yes,yes,No keys or content in exports; real RTT labelled accurately
+Privacy-preserving diagnostics,diagnostics,should,yes,yes,0.1.5 aggregate keyboard and scroll stages; current-connection queue pressure; no keys content directions or event timelines; RTT and queue wait clearly scoped
 Consent by default,security,should,no,yes,Incoming files require approval unless deliberately disabled
 Display lifecycle,layout,must,yes,partial,Two-second hotplug refresh; Mac UUID and Windows monitor interface paths; physical dock testing pending
 Single instance,desktop,should,yes,partial,Second launch focuses existing window; native verification pending
 Protected identities,security,must,yes,partial,Mac Keychain migration and Windows CI DPAPI tamper/round-trip verified; physical account-recovery validation pending
 Clipboard privacy markers,security,must,no,partial,Reference-app support unverified; Mac concealed/transient/generated and Windows history/cloud exclusions; unmarked secrets cannot be identified
 Responsive protected startup,desktop,must,no,yes,Background protected identity read; fail-closed IPC until ready; Quit works during approval wait; IPC mock regression
-Focus-independent keyboard handoff,input,must,yes,partial,0.1.4 dedicated Windows keyboard pump and atomic Enter-held barrier; native synthetic probes and encrypted handoffs pass; physical source-focus report pending
+Focus-independent keyboard handoff,input,must,yes,partial,0.1.4 dedicated Windows keyboard pump and atomic Enter-held barrier; native synthetic probes and encrypted handoffs pass; physical source-focus report pending; owner briefly reports good 0.1.4 behavior and feel; controlled long acceptance pending
+Fractional scrolling and Mac direction policy,input,must,yes,partial,0.1.5 fixed Mac wheel ABI and both-adapter remainder retention; local Mac preference conversion; native Windows and encrypted ordering pass; Mac execution and physical direction acceptance pending
+Repeatable sustained reliability fixture,testing,should,not assessed,yes,Opt-in encrypted loopback mixed-input handoffs with bulk pressure and repeated recovery; bounded aggregate timing; excludes native OS and physical latency

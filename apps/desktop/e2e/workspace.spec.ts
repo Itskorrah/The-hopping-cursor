@@ -15,6 +15,64 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 test.afterEach(() => expect(errors).toEqual([]));
+test("scroll diagnostics show receiver policy and queue pressure without sample counters by default", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await expect(
+    page.getByText("Captured scroll events", { exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.evaluate(() => {
+    const key = "hopping-cursor-interface-preview-v1";
+    const data = JSON.parse(localStorage.getItem(key)!);
+    data.scroll_diagnostics = {
+      captured: 32,
+      forwarded: 32,
+      received: 16,
+      applied: 16,
+      rejected: 0,
+      natural_scrolling: true,
+    };
+    data.control_queues = {
+      pending: 0,
+      peak_pending: 8,
+      coalesced_moves: 99,
+      full_rejections: 0,
+      longest_wait_us: 250,
+    };
+    localStorage.setItem(key, JSON.stringify(data));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Diagnostics", exact: true }).click();
+  await expect(
+    page.getByText("Captured scroll events", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Natural", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Coalesced pointer updates", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("0.25 ms", { exact: true })).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  for (const policy of [false, null]) {
+    await page.evaluate((natural) => {
+      const key = "hopping-cursor-interface-preview-v1";
+      const data = JSON.parse(localStorage.getItem(key)!);
+      data.scroll_diagnostics.natural_scrolling = natural;
+      localStorage.setItem(key, JSON.stringify(data));
+    }, policy);
+    await page.reload();
+    await page
+      .getByRole("button", { name: "Diagnostics", exact: true })
+      .click();
+    await expect(
+      page.getByText(policy === false ? "Traditional" : "OS default", {
+        exact: true,
+      }),
+    ).toBeVisible();
+  }
+});
 test("keyboard diagnostics explain capture and delivery without requiring source text focus", async ({
   page,
 }) => {

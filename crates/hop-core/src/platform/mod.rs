@@ -11,6 +11,8 @@ mod file_clipboard;
 mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+mod scroll;
 #[cfg(target_os = "windows")]
 mod windows;
 pub type CaptureCallback = Arc<dyn Fn(CapturedEvent) -> bool + Send + Sync>;
@@ -40,6 +42,9 @@ pub trait Platform: Send + Sync {
         None
     }
     fn keyboard_capture_stats(&self) -> Option<KeyboardCaptureStats> {
+        None
+    }
+    fn natural_scrolling(&self) -> Option<bool> {
         None
     }
     fn inject(&self, event: &InputEvent) -> Result<()>;

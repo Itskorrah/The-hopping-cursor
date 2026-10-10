@@ -1,6 +1,32 @@
 # Windows development handoff — 2026-10-10
 
-## Latest keyboard checkpoint — 0.1.4
+
+## Latest scroll/reliability checkpoint — 0.1.5
+
+Start with [TEST_0.1.5.md](TEST_0.1.5.md) and [Mac receiver handoff](MAC_HANDOFF_0.1.5.md).
+The owner briefly tested 0.1.4 and reports good behavior/feel, but Windows mouse
+scrolling on Mac failed. Mac's first wheel argument was incorrectly declared
+variadic; it is now fixed. Fractional input survives both native adapters, and
+Mac source normalization/receiver direction follow its local scroll setting.
+Read-only preference refresh stays off the input callback. Mac constructor tests
+are compile-checked on Windows and need actual Mac execution.
+
+Scroll stage/queue diagnostics contain counts only. Exact mixed-event ordering,
+first-wheel entry, denied input, queue pressure and existing security/recovery
+regressions pass. The repeatable encrypted soak and bounded parser campaign
+use synthetic data; their results are in the evidence report. They do not prove
+physical latency or multi-hour hardware reliability. Preserve the keyboard fixes,
+pairing, protected identities, injected-event filtering and emergency priority.
+
+Windows has a native 0.1.5 test package. Rebuild Mac using its stable existing
+signing setup before scroll acceptance. Protocol 2 is unchanged; older peers can
+decode messages but an older Mac cannot benefit from the updated receiver.
+Find Skills led to reviewed Systematic Debugging, TDD and Verification guidance,
+installed locally with MIT licenses. Keep specialist guidance subordinate to
+native API evidence. Continue independent work around hosted account blocks.
+
+
+## Previous keyboard checkpoint — 0.1.4
 
 Read [TEST_0.1.4.md](TEST_0.1.4.md) first. Owner testing says the 0.1.3 E/emoji fix
 appears successful, but initial Windows-to-Mac typing depends on first focusing

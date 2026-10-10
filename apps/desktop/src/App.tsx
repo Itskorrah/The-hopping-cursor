@@ -1083,6 +1083,83 @@ export default function App() {
                       )}
                     </>
                   )}
+                  {data.scroll_diagnostics && (
+                    <>
+                      {[
+                        [
+                          "Captured scroll events",
+                          data.scroll_diagnostics.captured,
+                        ],
+                        [
+                          "Forwarded scroll events",
+                          data.scroll_diagnostics.forwarded,
+                        ],
+                        [
+                          "Received scroll events",
+                          data.scroll_diagnostics.received,
+                        ],
+                        [
+                          "Applied scroll events",
+                          data.scroll_diagnostics.applied,
+                        ],
+                        [
+                          "Rejected scroll events",
+                          data.scroll_diagnostics.rejected,
+                        ],
+                      ].map(([label, value]) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                      <div>
+                        <dt>Local scroll direction</dt>
+                        <dd>
+                          {data.scroll_diagnostics.natural_scrolling == null
+                            ? "OS default"
+                            : data.scroll_diagnostics.natural_scrolling
+                              ? "Natural"
+                              : "Traditional"}
+                        </dd>
+                      </div>
+                    </>
+                  )}
+                  {data.control_queues && (
+                    <>
+                      {[
+                        [
+                          "Pending control messages",
+                          data.control_queues.pending,
+                        ],
+                        [
+                          "Peak pending per connection",
+                          data.control_queues.peak_pending,
+                        ],
+                        [
+                          "Coalesced pointer updates",
+                          data.control_queues.coalesced_moves,
+                        ],
+                        [
+                          "Full queue rejections",
+                          data.control_queues.full_rejections,
+                        ],
+                      ].map(([label, value]) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                      <div>
+                        <dt>Longest control queue wait</dt>
+                        <dd>
+                          {(data.control_queues.longest_wait_us / 1000).toFixed(
+                            2,
+                          )}{" "}
+                          ms
+                        </dd>
+                      </div>
+                    </>
+                  )}
                   <div>
                     <dt>Mouse controller</dt>
                     <dd>
@@ -1147,6 +1224,25 @@ export default function App() {
                     held-key handoffs and shared keyboards. Windows caret
                     observations are diagnostic hints; a source text field is
                     not required.
+                  </p>
+                )}
+                {data.scroll_diagnostics && (
+                  <p className="footnote">
+                    Scroll counts reset when the app restarts. Captured includes
+                    local scrolling; forwarded means queued for delivery.
+                    Applied means the OS injection call succeeded, which does
+                    not confirm that an app scrolled. No wheel positions or
+                    directions are recorded. Mac scroll direction follows its
+                    system setting.
+                  </p>
+                )}
+                {data.control_queues && (
+                  <p className="footnote">
+                    Queue readings cover current connections and reset when a
+                    connection is replaced. Only consecutive pointer positions
+                    are coalesced; scroll, keys and buttons retain their order.
+                    Queue wait excludes network and application latency.
+                    Emergency release uses a separate priority path.
                   </p>
                 )}
               </section>

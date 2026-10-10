@@ -72,3 +72,21 @@ native test priorities; this checkpoint is an owner-authorized alpha merge.
 - Automated: native tagged synthetic delivery with null/non-text/edit/null focus; independent keyboard delivery during mouse-thread pressure; atomic entry publication; 32 immediate first-key and 32 shared-keyboard handoffs; held Shift/new key order; aggregate diagnostics rendering/accessibility.
 - Physical pending: same Mac editor field with Windows desktop/non-text/Notepad/Chrome as source; immediate first letter and modifiers in both directions; no source duplicate typing; pause/reconnect/emergency cleanup. See docs/TEST_0.1.4.md.
 - Diagnostics contain counts and source focus/caret booleans, no typed text, key identities, app names or event history. Native synthetic input does not establish physical Mac behavior.
+
+
+## 0.1.5 scroll and sustained reliability
+
+- Portable: fractional/roundoff/release/direction conversion; first wheel after
+  lease entry in both directions; exact mixed scroll/key/button order and no
+  source scroll; denied/invalid input counters and content-free export; queue
+  coalescing/barriers/pressure/wait statistics.
+- Native Windows: signed vertical/horizontal sub-notch hook packets and injected
+  duplicate rejection, plus existing focus/pressure/parking probes run serially.
+- Synthetic stress: timed release-build encrypted loopback with alternating
+  handoffs, held keys/buttons, 1 MiB transfers and repeated connection recovery;
+  aggregate timing and final stage parity; opt-in bounded parser mutations.
+- Mac: typed ABI, fractional constructor and event-filter tests compile for both
+  architectures; native execution and actual two-computer delivery remain pending.
+- Physical: Natural on/off; immediate first wheel, rapid/reversed/small scroll,
+  multiple windows and displays, trackpad return direction, clipboard/file load,
+  pause/reconnect/emergency and multi-hour use. See docs/TEST_0.1.5.md.

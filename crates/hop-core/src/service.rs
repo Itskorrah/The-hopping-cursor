@@ -121,6 +121,11 @@ pub struct Service {
     keyboard_received: AtomicU64,
     keyboard_applied: AtomicU64,
     keyboard_rejected: AtomicU64,
+    scroll_captured: AtomicU64,
+    scroll_forwarded: AtomicU64,
+    scroll_received: AtomicU64,
+    scroll_applied: AtomicU64,
+    scroll_rejected: AtomicU64,
     displays_available: AtomicBool,
     session_clock: Mutex<SystemTime>,
     metadata_changed: watch::Sender<u64>,
@@ -252,6 +257,11 @@ impl Service {
             keyboard_received: AtomicU64::new(0),
             keyboard_applied: AtomicU64::new(0),
             keyboard_rejected: AtomicU64::new(0),
+            scroll_captured: AtomicU64::new(0),
+            scroll_forwarded: AtomicU64::new(0),
+            scroll_received: AtomicU64::new(0),
+            scroll_applied: AtomicU64::new(0),
+            scroll_rejected: AtomicU64::new(0),
             displays_available: AtomicBool::new(true),
             session_clock: Mutex::new(SystemTime::now()),
             listening_port,
@@ -360,6 +370,26 @@ impl Service {
                 rejected: self.keyboard_rejected.load(Ordering::Relaxed),
                 native: self.backend.keyboard_capture_stats(),
             },
+            scroll_diagnostics: ScrollDiagnostics {
+                captured: self.scroll_captured.load(Ordering::Relaxed),
+                forwarded: self.scroll_forwarded.load(Ordering::Relaxed),
+                received: self.scroll_received.load(Ordering::Relaxed),
+                applied: self.scroll_applied.load(Ordering::Relaxed),
+                rejected: self.scroll_rejected.load(Ordering::Relaxed),
+                natural_scrolling: self.backend.natural_scrolling(),
+            },
+            control_queues: self.channels.lock().unwrap().values().fold(
+                ControlQueueDiagnostics::default(),
+                |mut sum, channel| {
+                    let stats = channel.tx.diagnostics();
+                    sum.pending += stats.pending;
+                    sum.peak_pending = sum.peak_pending.max(stats.peak_pending);
+                    sum.coalesced_moves += stats.coalesced_moves;
+                    sum.full_rejections += stats.full_rejections;
+                    sum.longest_wait_us = sum.longest_wait_us.max(stats.longest_wait_us);
+                    sum
+                },
+            ),
             displays_ready: self.displays_available.load(Ordering::SeqCst),
             active_device: s
                 .active
@@ -906,7 +936,22 @@ impl Service {
     }
     pub fn export_diagnostics(&self) -> String {
         let snapshot = self.snapshot();
-        serde_json::to_string_pretty(&serde_json::json!({"version":snapshot.version,"platform":snapshot.local.platform,"permissions":snapshot.permissions,"port":snapshot.listening_port,"peer_count":snapshot.peers.len(),"connected_count":snapshot.peers.iter().filter(|p|p.connected).count(),"rtt_ms":snapshot.peers.iter().filter_map(|p|p.latency_ms).collect::<Vec<_>>(),"messages":snapshot.diagnostics,"keyboard":snapshot.keyboard_diagnostics,"local_controls_pointer":snapshot.controller_device==snapshot.local.id,"cursor_is_local":snapshot.active_device==snapshot.local.id})).unwrap()
+        serde_json::to_string_pretty(&serde_json::json!({
+            "version":snapshot.version,
+            "platform":snapshot.local.platform,
+            "permissions":snapshot.permissions,
+            "port":snapshot.listening_port,
+            "peer_count":snapshot.peers.len(),
+            "connected_count":snapshot.peers.iter().filter(|p|p.connected).count(),
+            "rtt_ms":snapshot.peers.iter().filter_map(|p|p.latency_ms).collect::<Vec<_>>(),
+            "messages":snapshot.diagnostics,
+            "keyboard":snapshot.keyboard_diagnostics,
+            "scroll":snapshot.scroll_diagnostics,
+            "control_queues":snapshot.control_queues,
+            "local_controls_pointer":snapshot.controller_device==snapshot.local.id,
+            "cursor_is_local":snapshot.active_device==snapshot.local.id
+        }))
+        .unwrap()
     }
     pub(crate) fn approved(&self, id: &str, key: &[u8]) -> Result<bool> {
         let c = self.config.lock().unwrap();
@@ -1307,6 +1352,7 @@ impl Service {
         });
     }
     fn send(&self, id: &str, message: Message) -> bool {
+        let scroll = matches!(message, Message::Input(InputEvent::Scroll { .. }));
         let keyboard = matches!(
             message,
             Message::Input(InputEvent::Key { .. }) | Message::SharedKey { .. }
@@ -1324,6 +1370,9 @@ impl Service {
         });
         if sent && keyboard {
             self.keyboard_forwarded.fetch_add(1, Ordering::Relaxed);
+        }
+        if sent && scroll {
+            self.scroll_forwarded.fetch_add(1, Ordering::Relaxed);
         }
         sent
     }
@@ -1397,6 +1446,10 @@ impl Service {
         self.state.lock().unwrap().layout_offers.remove(peer);
     }
     fn receive_control(&self, id: &str, message: Message) -> Result<()> {
+        let scroll = matches!(message, Message::Input(InputEvent::Scroll { .. }));
+        if scroll {
+            self.scroll_received.fetch_add(1, Ordering::Relaxed);
+        }
         let keyboard = matches!(
             message,
             Message::Input(InputEvent::Key { .. }) | Message::SharedKey { .. }
@@ -1557,6 +1610,9 @@ impl Service {
                 self.backend.inject(&InputEvent::Move { x, y })?;
             }
             Message::Input(event) => {
+                if scroll && !event.validate() {
+                    self.scroll_rejected.fetch_add(1, Ordering::Relaxed);
+                }
                 anyhow::ensure!(event.validate(), "Invalid input event");
                 let owner = self.state.lock().unwrap().inbound.as_deref() == Some(id);
                 if allowed && owner {
@@ -1572,12 +1628,25 @@ impl Service {
                             "Cursor outside native display"
                         );
                     }
-                    self.backend.inject(&event)?;
+                    if let Err(error) = self.backend.inject(&event) {
+                        if scroll {
+                            self.scroll_rejected.fetch_add(1, Ordering::Relaxed);
+                        }
+                        return Err(error);
+                    }
+                    if scroll {
+                        self.scroll_applied.fetch_add(1, Ordering::Relaxed);
+                    }
                     if keyboard {
                         self.keyboard_applied.fetch_add(1, Ordering::Relaxed);
                     }
-                } else if keyboard {
-                    self.keyboard_rejected.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    if keyboard {
+                        self.keyboard_rejected.fetch_add(1, Ordering::Relaxed);
+                    }
+                    if scroll {
+                        self.scroll_rejected.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             }
             Message::Leave => {
@@ -1608,6 +1677,9 @@ impl Service {
         Ok(())
     }
     pub fn capture(&self, event: CapturedEvent) -> bool {
+        if matches!(event, CapturedEvent::Input(InputEvent::Scroll { .. })) {
+            self.scroll_captured.fetch_add(1, Ordering::Relaxed);
+        }
         if matches!(event, CapturedEvent::Input(InputEvent::Key { .. })) {
             self.keyboard_captured.fetch_add(1, Ordering::Relaxed);
         }
@@ -2494,6 +2566,63 @@ mod tests {
             source.shutdown();
             assert!(queued, "Enter must be queued before native forwarding exposes the new active owner (edge={edge})");
         }
+    }
+
+    #[tokio::test]
+    async fn scroll_diagnostics_count_denied_and_invalid_input_without_exporting_deltas() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Arc::new(Headless::default());
+        let service = start_test(dir.path().into(), Some(0), backend.clone())
+            .await
+            .unwrap();
+        assert!(!service.capture(CapturedEvent::Input(InputEvent::Scroll { x: 0., y: 0.125 })));
+        service
+            .receive_control(
+                "unpaired",
+                Message::Input(InputEvent::Scroll { x: 0., y: 0.125 }),
+            )
+            .unwrap();
+        service.state.lock().unwrap().inbound = Some("unpaired".into());
+        service
+            .receive_control(
+                "unpaired",
+                Message::Input(InputEvent::Scroll { x: -0.25, y: 0. }),
+            )
+            .unwrap();
+        assert!(service
+            .receive_control(
+                "unpaired",
+                Message::Input(InputEvent::Scroll { x: f64::NAN, y: 0. })
+            )
+            .is_err());
+        let stats = service.snapshot().scroll_diagnostics;
+        assert_eq!(
+            (
+                stats.captured,
+                stats.forwarded,
+                stats.received,
+                stats.applied,
+                stats.rejected
+            ),
+            (1, 0, 3, 0, 3)
+        );
+        assert!(!backend
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, InputEvent::Scroll { .. })));
+        let exported = service.export_diagnostics();
+        let data: serde_json::Value = serde_json::from_str(&exported).unwrap();
+        assert!(data.get("public_key").is_none());
+        assert!(data["scroll"].get("x").is_none());
+        assert!(data["scroll"].get("y").is_none());
+        assert!(
+            !exported.contains("0.125")
+                && !exported.contains("unpaired")
+                && !exported.contains("NaN")
+        );
+        service.shutdown();
     }
 
     #[tokio::test]

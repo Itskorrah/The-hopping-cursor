@@ -37,3 +37,22 @@ single-input replay at the original 512 MiB cap and a 61-second campaign with
 5,930,511 cases at 588 MiB. These are short parser smoke campaigns, not exhaustive protocol, native-adapter, or
 cryptographic assurance. Continue longer campaigns and independent review before
 production distribution.
+
+
+## Portable Windows mutation fallback (0.1.5)
+
+The normal MSVC toolchain on this PC does not run the Mac/Linux ASan harness.
+A deterministic bounded smoke campaign is available without libFuzzer:
+
+```powershell
+. ./scripts/use-windows-portable-toolchain.ps1
+$env:HOP_MUTATION_CASES = '1000000'
+cargo test --locked --release -p hop-core --features fuzzing --lib bounded_plaintext_mutation_campaign -- --ignored --nocapture
+```
+
+It mutates synthetic introductions/input/blob frames and the retained malformed
+fixture, truncates, appends, flips bits and exercises malformed counts/random
+bounded buffers. Seed is fixed; input length is capped at 65,519 bytes. The
+existing decode/validate/canonical-roundtrip invariants are exercised. One million
+cases pass on Windows in this pass. This is not coverage-guided, uses no sanitizer,
+and must not be described as equivalent to the ASan campaigns above.

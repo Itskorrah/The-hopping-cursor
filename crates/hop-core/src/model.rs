@@ -186,6 +186,30 @@ pub struct Snapshot {
     pub session_available: bool,
     pub suppressed_events: Option<u64>,
     pub keyboard_diagnostics: KeyboardDiagnostics,
+    pub scroll_diagnostics: ScrollDiagnostics,
+    pub control_queues: ControlQueueDiagnostics,
+}
+/// Counts only, with no wheel positions, directions, apps or event trace.
+/// These process-lifetime counters describe engine stages, not application
+/// acceptance of an OS-injected event.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScrollDiagnostics {
+    pub captured: u64,
+    pub forwarded: u64,
+    pub received: u64,
+    pub applied: u64,
+    pub rejected: u64,
+    pub natural_scrolling: Option<bool>,
+}
+/// Normal control queues for current connections. Historical values reset
+/// when a connection is replaced. Wait excludes socket/OS/application latency.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ControlQueueDiagnostics {
+    pub pending: usize,
+    pub peak_pending: usize,
+    pub coalesced_moves: u64,
+    pub full_rejections: u64,
+    pub longest_wait_us: u64,
 }
 /// Aggregate counts only: never key identities, text, foreground app names or
 /// a timestamped event trace. Reset when the engine process restarts.

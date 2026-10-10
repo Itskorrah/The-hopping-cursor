@@ -1,11 +1,12 @@
 # The Hopping Cursor
 
-**Keyboard handoff pass: v0.1.4.** Windows keyboard capture now has its own
-message pump; remote entry and held state queue before the active owner becomes
-visible to concurrent input. Aggregate diagnostics distinguish capture, forwarding
-and receiver application without recording typed content. Two failing regressions
-now pass. The owner's source-focus typing failure still requires physical
-acceptance; E/emoji appears fixed in their 0.1.3 test. See [0.1.4 evidence](docs/TEST_0.1.4.md).
+**Scroll and reliability pass: v0.1.5.** The Mac scroll constructor now declares
+its fixed first wheel argument correctly. Both adapters preserve fractional
+scrolling; Mac direction follows its local natural/traditional preference.
+Aggregate scroll and queue diagnostics distinguish capture, delivery and injection.
+The owner reports that 0.1.4 feels good in a short test; Mac scrolling still needs
+the rebuilt receiver and physical acceptance. See [verification](docs/TEST_0.1.5.md)
+and [Mac handoff](docs/MAC_HANDOFF_0.1.5.md).
 
 A desktop application for sharing a mouse, keyboard, clipboard, and files between your own computers on a local network. A Rust engine, native Windows and macOS input adapters, and a Tauri/React control interface. Independently implemented from public product research; no proprietary code or assets used.
 
@@ -18,9 +19,9 @@ The sidebar fills the window height; this is not the browser sample preview.
 
 **Continue development on Windows:** [Windows handoff](docs/WINDOWS_HANDOFF.md).
 The 0.1.2 checkpoint confirmed basic control in both directions. The 0.1.4
-pass addresses keyboard pump starvation and entry ordering. E/emoji now appears
-fixed in owner testing; source-focus typing, directional feel and complete
-reconnect acceptance remain open.
+keyboard and 0.1.5 scroll passes add targeted regressions and aggregate diagnostics.
+E/emoji appears fixed and a brief owner test feels good; long physical scroll,
+typing, directional feel and reconnect acceptance remain open.
 
 ## What's built
 
@@ -132,7 +133,7 @@ npx playwright install chromium
 npm run test:ui
 ```
 
-The 0.1.4 suite has **62 passing Windows core tests, four separately run native pointer/keyboard probes and 17 browser tests**. Core code checks for both Mac architectures; updated Mac runtime tests remain pending. The earlier 0.1.2 Mac checkpoint passed 55 Rust tests. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
+The 0.1.5 suite has **71 passing Windows core tests, five separately run native pointer/keyboard/wheel probes and 18 browser tests**. See [scroll and reliability evidence](docs/TEST_0.1.5.md) for timed loopback, parser mutation and resource measurements. Core code checks for both Mac architectures; updated Mac runtime tests remain pending. The earlier 0.1.2 Mac checkpoint passed 55 Rust tests. Rust checks include real encrypted TCP services, ciphertext tampering/replay rejection, fragmented packets during simultaneous input/heartbeats, saturated-queue emergency release, pairing/revocation, recipient consent, byte-for-byte transfers, duplicate filenames, clipboard exchange, held-key handoff, hop shortcuts, and pause/disconnect recovery. Browser tests cover preferences, pairing consent, arrangement, profiles, permissions, shortcuts, accessibility, and small-screen layout. The suite includes two native Mac checks using isolated pasteboards for file URLs and privacy markers without replacing your clipboard. These checks do not substitute for cross-application or physical multi-computer testing.
 
 Dependency audit results and remaining warnings are recorded in [docs/SECURITY.md](docs/SECURITY.md). The prioritized path from this alpha to a release is in [docs/ROADMAP.md](docs/ROADMAP.md); the research feature matrix is in [replica/features.csv](replica/features.csv).
 
