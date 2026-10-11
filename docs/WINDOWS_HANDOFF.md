@@ -1,5 +1,16 @@
 # Windows development handoff — 2026-10-10
 
+## Mac cursor checkpoint — 0.1.6, 2026-10-11
+
+See [TEST_0.1.6.md](TEST_0.1.6.md). The owner reports an intermittently visible
+Mac cursor at the edge while controlling Windows. Mac forwarding now enables
+background cursor control on its own WindowServer connection and synchronously
+parks in the display interior. Native lifecycle/parking regressions and the
+engine's edge/jump ordering regression exercise the correction; physical
+duplicate-cursor acceptance remains pending. No Windows adapter or protocol
+change: the existing Windows 0.1.5 app is compatible. Preserve the scoped runtime
+checks and cleanup; the WindowServer facility is undocumented.
+
 
 ## Latest scroll/reliability checkpoint — 0.1.5
 

@@ -4,11 +4,13 @@ The implemented engine is ready for controlled two-computer testing. This list
 orders the remaining work by its effect on a reliable product. It does not imply
 that unfinished features currently work.
 
-The 2026-10-10 alpha checkpoint is on main. Basic bidirectional Windows↔Mac
-control is user-confirmed. Continue with [the Windows handoff](WINDOWS_HANDOFF.md):
-first correct Windows E opening Mac emojis (BUG-018), then Windows-source mouse
-feel (BUG-019) and setup/reconnect friction (BUG-020), preserving the smooth
-Mac→Windows path. These remain open, and native file dragging is unfinished.
+Basic bidirectional Windows↔Mac control and the E/emoji correction are
+owner-reported. The 0.1.3–0.1.5 passes added Windows motion, keyboard, setup and
+scroll regressions. The Mac 0.1.6 pass addresses background source-cursor hiding
+and synchronous parking (BUG-024). Complete its [physical retest](TEST_0.1.6.md),
+then the broader input/scroll/reconnect matrix, preserving the smooth
+Mac→Windows path. See [the Windows handoff](WINDOWS_HANDOFF.md) for prior
+evidence. Native file dragging remains unfinished.
 
 1. **Validate native input on hardware.** Complete PLATFORM_TESTING.md for
    Windows→Windows, Mac→Mac, and both directions of Windows↔Mac. Include Retina,

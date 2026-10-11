@@ -612,15 +612,17 @@ impl Service {
             self.restore_physical();
             return Ok(());
         }
-        let park = local
-            .displays
-            .iter()
-            .find(|d| d.bounds.contains(return_position.0, return_position.1))
-            .unwrap_or(&local.displays[0]);
-        self.backend.inject(&InputEvent::Move {
-            x: park.bounds.x + park.bounds.width / 2.,
-            y: park.bounds.y + park.bounds.height / 2.,
-        })?;
+        if !self.backend.manages_cursor_parking() {
+            let park = local
+                .displays
+                .iter()
+                .find(|d| d.bounds.contains(return_position.0, return_position.1))
+                .unwrap_or(&local.displays[0]);
+            self.backend.inject(&InputEvent::Move {
+                x: park.bounds.x + park.bounds.width / 2.,
+                y: park.bounds.y + park.bounds.height / 2.,
+            })?;
+        }
         self.release_physical_on_source();
         let mut state = self.state.lock().unwrap();
         // Publish the Enter barrier while ownership is locked. A keyboard
@@ -1946,10 +1948,12 @@ impl Service {
                                 if old_was_local {
                                     self.release_physical_on_source();
                                 }
-                                let _ = self.backend.inject(&InputEvent::Move {
-                                    x: park_x,
-                                    y: park_y,
-                                });
+                                if !self.backend.manages_cursor_parking() {
+                                    let _ = self.backend.inject(&InputEvent::Move {
+                                        x: park_x,
+                                        y: park_y,
+                                    });
+                                }
                                 if let Err(e) = self.sync_forwarding() {
                                     self.note(format!("Cannot suppress local input: {e}"));
                                     self.release();
@@ -2463,12 +2467,56 @@ mod tests {
 
     #[tokio::test]
     async fn remote_lease_is_queued_before_native_handoff_for_jump_and_edge() {
-        for edge in [false, true] {
+        // Fake only the OS boundary. The service, queues and ownership are real.
+        struct ParkingBackend {
+            inner: Arc<Headless>,
+            native_parking: bool,
+        }
+        impl Platform for ParkingBackend {
+            fn name(&self) -> &str {
+                self.inner.name()
+            }
+            fn displays(&self) -> Result<Vec<Display>> {
+                self.inner.displays()
+            }
+            fn permissions(&self) -> Permissions {
+                self.inner.permissions()
+            }
+            fn start_capture(&self, cb: crate::platform::CaptureCallback) -> Result<()> {
+                self.inner.start_capture(cb)
+            }
+            fn stop_capture(&self) {
+                self.inner.stop_capture()
+            }
+            fn set_forwarding(&self, forwarding: bool) -> Result<()> {
+                self.inner.set_forwarding(forwarding)
+            }
+            fn manages_cursor_parking(&self) -> bool {
+                self.native_parking
+            }
+            fn inject(&self, event: &InputEvent) -> Result<()> {
+                self.inner.inject(event)
+            }
+            fn read_clipboard(&self) -> Result<Vec<ClipboardPart>> {
+                self.inner.read_clipboard()
+            }
+            fn write_clipboard(&self, parts: &[ClipboardPart]) -> Result<()> {
+                self.inner.write_clipboard(parts)
+            }
+        }
+        for (edge, native_parking) in [(false, false), (true, false), (false, true), (true, true)] {
             let dir = tempfile::tempdir().unwrap();
             let backend = Arc::new(Headless::default());
-            let source = start_test(dir.path().into(), Some(0), backend.clone())
-                .await
-                .unwrap();
+            let source = start_test(
+                dir.path().into(),
+                Some(0),
+                Arc::new(ParkingBackend {
+                    inner: backend.clone(),
+                    native_parking,
+                }),
+            )
+            .await
+            .unwrap();
             let mut remote = source.snapshot().local;
             remote.id = "test-peer".into();
             {
@@ -2563,8 +2611,20 @@ mod tests {
                     .unwrap();
             }
             let queued = ready.load(Ordering::SeqCst);
+            let parking_moves = backend
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| matches!(e, InputEvent::Move { .. }))
+                .count();
             source.shutdown();
             assert!(queued, "Enter must be queued before native forwarding exposes the new active owner (edge={edge})");
+            assert_eq!(
+                parking_moves,
+                usize::from(!native_parking),
+                "Native parking must not leave a queued mouse move after return (edge={edge}, native={native_parking})"
+            );
         }
     }
 

@@ -91,3 +91,8 @@ installed Mac app is already 0.1.1; its permission/IPC checks pass.
 The tests model portable routing and directly exercise the Mac filter using
 constructed events that are never posted. They do not establish physical hook,
 background cursor visibility or foreground-application suppression behavior.
+
+For the current Mac source-cursor correction, use Mac 0.1.6 with Windows 0.1.5
+and follow [the focused visibility checklist](TEST_0.1.6.md). Native probes verify
+background capability, synchronous parking and lifecycle restoration; they do
+not establish visually that only one cursor appears during a physical crossing.

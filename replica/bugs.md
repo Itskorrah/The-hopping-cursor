@@ -324,3 +324,23 @@ bug reproductions. See docs/PLATFORM_TESTING.md.
   constructor execution pending. Update the Mac receiver to 0.1.5; the Windows
   installer alone cannot update it. See docs/TEST_0.1.5.md. No speculative smoothing,
   OS preference writes, focus workarounds or filter relaxation were added.
+
+### BUG-024: Mac source cursor sometimes stays visible at the screen edge
+
+- Severity: S2; owner report on 0.1.5 while controlling Windows.
+- Expected: only the destination computer shows a pointer; release and failures
+  reliably restore local input and visibility.
+- Confirmed local weaknesses: background cursor capability remains disabled;
+  forwarding does not synchronously park inside the display. Native regressions
+  fail before correction and pass afterward. The complete intermittent physical
+  failure has not been independently reproduced.
+- 0.1.6: scoped own-connection background cursor capability, synchronous parking,
+  balanced idempotent hide/show and lifecycle restoration. No queued parking
+  moves for this adapter in either edge or explicit jump handoffs. Windows keeps
+  its existing fallback; protocol 2 and Windows 0.1.5 compatibility remain.
+- The WindowServer capability is undocumented, dynamically resolved and checked.
+  Missing/changed support fails forwarding and returns input locally. Future
+  macOS compatibility and physical visual acceptance remain open.
+- Status: local weaknesses corrected and regression-tested; **physical single-
+  cursor acceptance pending**. See docs/TEST_0.1.6.md. Ownership status and the
+  unsupported CGCursorIsVisible query are not visual proof.

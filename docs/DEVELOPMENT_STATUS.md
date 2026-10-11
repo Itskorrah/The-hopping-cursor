@@ -1,4 +1,17 @@
-# Development evidence — 2026-10-09
+# Development evidence
+
+Latest checkpoint: [Mac 0.1.6 cursor handoff evidence](TEST_0.1.6.md), 2026-10-11.
+Background cursor capability and synchronous parking regressions pass, including
+lifecycle cleanup and edge/jump ordering. 75 default Rust tests, two separately
+run native cursor probes and 18 browser tests pass. Strict Apple Silicon
+engine/CLI/desktop checks and Intel Mac/Windows engine/CLI cross-checks pass.
+Physical single-cursor acceptance is still pending; the scoped WindowServer
+capability is undocumented. Windows 0.1.5 remains compatible.
+The signed 0.1.6 Mac debug app is installed with unchanged signing requirement
+and every configuration field preserved. Native permissions are available,
+the paired PC reconnects, and Jump here/Bring input here pass local IPC checks.
+
+The following checkpoints are historical evidence.
 
 Latest checkpoint: [0.1.4 keyboard handoff evidence](TEST_0.1.4.md).
 Separate Windows keyboard pump and atomic remote entry fix two demonstrated

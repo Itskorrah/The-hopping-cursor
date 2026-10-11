@@ -10,6 +10,7 @@ use std::{
     },
     thread::JoinHandle,
 };
+mod cursor;
 type Ref = *mut c_void;
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -152,6 +153,7 @@ extern "C" {
     fn CGPreflightListenEventAccess() -> bool;
     fn CGRequestListenEventAccess() -> bool;
     fn CGGetActiveDisplayList(max: u32, ids: *mut u32, count: *mut u32) -> i32;
+    fn CGGetDisplaysWithPoint(point: Point, max: u32, ids: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(id: u32) -> CGRect;
     fn CGMainDisplayID() -> u32;
     fn CGDisplayPixelsWide(id: u32) -> usize;
@@ -200,7 +202,7 @@ struct TapContext {
     callback: CaptureCallback,
     tap: Ref,
     modifiers: BTreeSet<u16>,
-    parked: Arc<Mutex<Option<Point>>>,
+    parked: Arc<Mutex<Option<Parking>>>,
     suppressed: Arc<AtomicU64>,
     natural_scroll: Arc<AtomicBool>,
 }
@@ -284,8 +286,16 @@ extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
             // Quartz can update the hardware cursor before an active session
             // filter deletes the event. Park it without generating another event.
             if matches!(kind, 5 | 6 | 7 | 27) {
-                if let Some(point) = *ctx.parked.lock().unwrap() {
-                    CGWarpMouseCursorPosition(point);
+                let failed = ctx
+                    .parked
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|parking| CGWarpMouseCursorPosition(parking.anchor) != 0);
+                if failed {
+                    // Release without holding the parking lock; recovery uses it.
+                    (ctx.callback)(CapturedEvent::Input(InputEvent::ReleaseAll));
+                    return event;
                 }
             }
             std::ptr::null_mut()
@@ -294,12 +304,17 @@ extern "C" fn event_callback(_: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
         }
     }
 }
+struct Parking {
+    anchor: Point,
+    origin: Point,
+}
 pub struct Mac {
     runloop: AtomicUsize,
     thread: Mutex<Option<JoinHandle<()>>>,
     held: Mutex<BTreeSet<u16>>,
     buttons: Mutex<BTreeSet<u8>>,
-    parked: Arc<Mutex<Option<Point>>>,
+    parked: Arc<Mutex<Option<Parking>>>,
+    background_cursor: Mutex<Option<cursor::BackgroundCursor>>,
     source: Mutex<usize>,
     suppressed: Arc<AtomicU64>,
     natural_scroll: Arc<AtomicBool>,
@@ -313,6 +328,7 @@ impl Mac {
             held: Mutex::new(BTreeSet::new()),
             buttons: Mutex::new(BTreeSet::new()),
             parked: Arc::new(Mutex::new(None)),
+            background_cursor: Mutex::new(None),
             source: Mutex::new(0),
             suppressed: Arc::new(AtomicU64::new(0)),
             natural_scroll: Arc::new(AtomicBool::new(read_natural_scroll())),
@@ -479,20 +495,61 @@ impl Platform for Mac {
     }
     fn set_forwarding(&self, forwarding: bool) -> Result<()> {
         let mut parked = self.parked.lock().unwrap();
+        let mut background = self.background_cursor.lock().unwrap();
         unsafe {
             if forwarding && parked.is_none() {
                 let event = CGEventCreate(std::ptr::null_mut());
                 anyhow::ensure!(!event.is_null(), "Cannot locate source cursor");
-                let point = CGEventGetLocation(event);
+                let origin = CGEventGetLocation(event);
                 CFRelease(event);
+                // Query only Quartz geometry here. The normal display refresh
+                // also reads preferences and must stay off the input callback.
+                let mut display = 0;
+                let mut count = 0;
+                anyhow::ensure!(
+                    CGGetDisplaysWithPoint(origin, 1, &mut display, &mut count) == 0 && count == 1,
+                    "Source cursor is outside available displays"
+                );
+                let bounds = CGDisplayBounds(display);
+                let anchor = Point {
+                    x: bounds.origin.x + bounds.size.width / 2.,
+                    y: bounds.origin.y + bounds.size.height / 2.,
+                };
+                if background.is_none() {
+                    *background = Some(cursor::BackgroundCursor::enable()?);
+                }
                 anyhow::ensure!(CGDisplayHideCursor(0) == 0, "Cannot hide source cursor");
-                *parked = Some(point);
+                // Record the one owned hide immediately, so a failed warp is
+                // recoverable without leaking or duplicating the hide count.
+                *parked = Some(Parking { anchor, origin });
+                anyhow::ensure!(
+                    CGWarpMouseCursorPosition(anchor) == 0,
+                    "Cannot park source cursor"
+                );
             } else if !forwarding && parked.is_some() {
+                let origin = parked.as_ref().unwrap().origin;
+                // Restore position before showing. A failed show retains the
+                // lease so recovery can retry without decrementing twice.
+                let warped = CGWarpMouseCursorPosition(origin);
                 anyhow::ensure!(CGDisplayShowCursor(0) == 0, "Cannot restore source cursor");
                 *parked = None;
+                if let Some(capability) = background.as_mut() {
+                    capability.restore()?;
+                }
+                *background = None;
+                anyhow::ensure!(warped == 0, "Cannot restore source cursor position");
+            } else if !forwarding {
+                // A previous hide/show succeeded but property restoration failed.
+                if let Some(capability) = background.as_mut() {
+                    capability.restore()?;
+                }
+                *background = None;
             }
         }
         Ok(())
+    }
+    fn manages_cursor_parking(&self) -> bool {
+        true
     }
     fn suppressed_events(&self) -> Option<u64> {
         Some(self.suppressed.load(Ordering::Relaxed))
@@ -697,6 +754,115 @@ pub fn read_html() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "Changes real cursor visibility; quit sharing apps and run serially in a background terminal"]
+    fn mac_background_forwarding_enables_and_restores_its_cursor_capability() {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        extern "C" {
+            fn CGSMainConnectionID() -> i32;
+            fn CGSCopyConnectionProperty(
+                connection: i32,
+                owner: i32,
+                key: Ref,
+                value: *mut Ref,
+            ) -> i32;
+        }
+        unsafe fn background_enabled() -> bool {
+            let key = CFStringCreateWithCString(
+                std::ptr::null_mut(),
+                c"SetsCursorInBackground".as_ptr(),
+                0x08000100,
+            );
+            assert!(!key.is_null());
+            let connection = CGSMainConnectionID();
+            let mut value = std::ptr::null_mut();
+            let error = CGSCopyConnectionProperty(connection, connection, key, &mut value);
+            CFRelease(key);
+            assert_eq!(error, 0);
+            let enabled = !value.is_null()
+                && CFGetTypeID(value) == CFBooleanGetTypeID()
+                && CFBooleanGetValue(value);
+            if !value.is_null() {
+                CFRelease(value);
+            }
+            enabled
+        }
+        let original = unsafe { background_enabled() };
+        let native = Mac::new();
+        for _ in 0..3 {
+            native.set_forwarding(true).unwrap();
+            native.set_forwarding(true).unwrap();
+            let background = unsafe { background_enabled() };
+            // Restore before asserting, even when the old background hide fails.
+            native.set_forwarding(false).unwrap();
+            native.set_forwarding(false).unwrap();
+            assert!(
+                background,
+                "Forwarding cannot hide the cursor behind other Mac apps"
+            );
+            assert_eq!(unsafe { background_enabled() }, original);
+        }
+        native.set_forwarding(true).unwrap();
+        native.stop_capture();
+        assert!(native.parked.lock().unwrap().is_none());
+        assert_eq!(unsafe { background_enabled() }, original);
+        native.set_forwarding(true).unwrap();
+        drop(native);
+        assert_eq!(unsafe { background_enabled() }, original);
+
+        // Respect a capability already owned by another component in our process.
+        let previous_owner = cursor::BackgroundCursor::enable().unwrap();
+        let native = Mac::new();
+        native.set_forwarding(true).unwrap();
+        native.set_forwarding(false).unwrap();
+        assert!(unsafe { background_enabled() });
+        drop(native);
+        drop(previous_owner);
+        assert_eq!(unsafe { background_enabled() }, original);
+    }
+
+    #[test]
+    #[ignore = "Warps the real cursor; quit sharing apps and run serially"]
+    fn mac_forwarding_parks_inside_the_display_and_restores_without_an_event() {
+        unsafe fn position() -> Point {
+            let event = CGEventCreate(std::ptr::null_mut());
+            assert!(!event.is_null());
+            let point = CGEventGetLocation(event);
+            CFRelease(event);
+            point
+        }
+        struct RestorePosition(Point);
+        impl Drop for RestorePosition {
+            fn drop(&mut self) {
+                unsafe {
+                    CGWarpMouseCursorPosition(self.0);
+                }
+            }
+        }
+        let saved = RestorePosition(unsafe { position() });
+        let native = Mac::new();
+        let display = native
+            .displays()
+            .unwrap()
+            .into_iter()
+            .find(|d| d.bounds.contains(saved.0.x, saved.0.y))
+            .unwrap();
+        // Start away from the center so the old no-op parking cannot pass just
+        // because the user happened to leave their pointer at the anchor.
+        let origin = Point {
+            x: display.bounds.x + display.bounds.width / 4.,
+            y: display.bounds.y + display.bounds.height / 4.,
+        };
+        assert_eq!(unsafe { CGWarpMouseCursorPosition(origin) }, 0);
+        native.set_forwarding(true).unwrap();
+        let parked = unsafe { position() };
+        native.set_forwarding(false).unwrap();
+        let restored = unsafe { position() };
+        assert!((parked.x - (display.bounds.x + display.bounds.width / 2.)).abs() < 1.);
+        assert!((parked.y - (display.bounds.y + display.bounds.height / 2.)).abs() < 1.);
+        assert!((restored.x - origin.x).abs() < 1. && (restored.y - origin.y).abs() < 1.);
+    }
 
     #[test]
     fn quartz_scroll_constructor_uses_fixed_primary_wheel_argument() {

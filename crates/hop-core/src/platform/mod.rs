@@ -38,6 +38,11 @@ pub trait Platform: Send + Sync {
     fn set_forwarding(&self, _forwarding: bool) -> Result<()> {
         Ok(())
     }
+    /// Native forwarding owns synchronous parking; avoid a queued synthetic move
+    /// that can arrive after cursor ownership has already returned locally.
+    fn manages_cursor_parking(&self) -> bool {
+        false
+    }
     fn suppressed_events(&self) -> Option<u64> {
         None
     }
