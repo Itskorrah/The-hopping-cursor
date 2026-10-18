@@ -12,7 +12,11 @@ keyboard hook is unnecessary. Previous modifier translation only exchanged
 Control/Command, not Alt/Tab. The new stateful route converts an already-held
 Left Option to Command at Left Alt+Tab, carries the Command modifier over
 repeated Tab, and balances it on Alt-up. An unrelated key switches back to
-Option. Right Alt/AltGr and Control+Alt combinations are excluded.
+Option. Right Alt/AltGr and Control+Alt combinations are excluded from the **new
+shortcut bridge**. This does not prove international-character compatibility:
+some Windows AltGr layouts synthesise Left Ctrl+Right Alt, and the pre-existing
+global Ctrl-to-Command mapping may still affect characters. Keep that defect
+in the open native acceptance queue. Do not assert all AltGr input is unaffected.
 
 Reference design checks: Microsoft's `LowLevelKeyboardProc` specification
 requires fast hook return, allows non-zero consumption on normal desktop
