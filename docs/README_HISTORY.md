@@ -28,10 +28,10 @@ cargo test --locked --test discovery -- --ignored
 
 Recovery also suspends input for unavailable displays/permissions and protected input sessions, and clears stale ownership/keys after timing gaps. This is safety recovery, not synchronized lock/wake control.
 
-A bounded AddressSanitizer parser fuzz run completed 5,299,006 cases in 181 seconds without a crash; see [fuzz/README.md](fuzz/README.md) for scope and commands.
+A bounded AddressSanitizer parser fuzz run completed 5,299,006 cases in 181 seconds without a crash; see [fuzz/README.md](../fuzz/README.md) for scope and commands.
 
 The CLI supports `daemon --no-discovery` for manual/remembered connections.
-See [docs/DEVELOPMENT_STATUS.md](docs/DEVELOPMENT_STATUS.md) for detailed evidence.
+See [docs/DEVELOPMENT_STATUS.md](DEVELOPMENT_STATUS.md) for detailed evidence.
 
 ## Input-routing update (historical 0.1.1, 2026-10-09)
 
@@ -101,8 +101,8 @@ E on the Windows keyboard opens the Mac emoji picker. Initial connection require
 reconnect and Pause/Resume experimentation. These remain open bugs, not completed
 fixes. Explicit single-cursor, held-input, high-DPI, clipboard-file and recovery
 acceptance remains pending.
-See [the update checklist](docs/TEST_0.1.2.md) and
-[native drag research](docs/NATIVE_DRAG_DESIGN.md). No new latency benchmark or
+See [the update checklist](TEST_0.1.2.md) and
+[native drag research](NATIVE_DRAG_DESIGN.md). No new latency benchmark or
 Windows secure-desktop support is claimed.
 
 Protected identity access now runs off the desktop UI thread. While a system
@@ -113,7 +113,7 @@ explains that the saved files remain available through File transfers.
 
 ## Windows continuation (2026-10-10)
 
-Start from current `main`; [docs/WINDOWS_HANDOFF.md](docs/WINDOWS_HANDOFF.md)
+Start from current `main`; [docs/WINDOWS_HANDOFF.md](WINDOWS_HANDOFF.md)
 contains prerequisites, commands, source pointers, known bugs and a reusable
 Codex prompt. Priorities are keyboard correctness (BUG-018), Windows→Mac pointer
 consistency (BUG-019), and clear, dependable setup/reconnection (BUG-020). The Mac
