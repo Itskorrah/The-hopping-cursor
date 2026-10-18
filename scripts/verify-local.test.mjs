@@ -42,7 +42,7 @@ test("native packaging refuses unsupported platforms", () => {
 });
 
 test("multiple dry-run options are idempotent", () => {
-  const result = invoke("--dry-run","--dry-run");
+  const result = invoke("--dry-run", "--dry-run");
   assert.equal(result.status, 0);
   assert.match(result.stdout, /none executed/);
 });
