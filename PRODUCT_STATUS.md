@@ -22,9 +22,17 @@
 
 - **Code inspection:** Windows/macOS input adapters, HID conversion, routing,
   crypto/control recovery, Tauri UI and workflows inspected.
-- **Automated checks:** not proven passing for this branch until CI actually
-  executes steps or a developer runs commands in an eligible environment.
+- **Automated checks:** the fresh PR workflow [run 39131429829](https://github.com/Itskorrah/The-hopping-cursor/actions/runs/39131429829)
+  failed before execution on 2026-10-19 (Sydney time): **all five jobs had
+  zero steps and no assigned runner**. This is an Actions allocation/account
+  blocker, not a Rust, TypeScript or native test result. Local Rust/Cargo
+  toolchains and physical paired machines are unavailable in this session.
 - **Physical Windows+Mac:** unavailable to this session, so **unverified**.
+- **Remaining routing edge:** an *idle Windows keyboard* forwarded through the
+  existing `SharedKey` path while a different computer owns the pointer still
+  uses the legacy modifier map; the new chord bridge applies to the active
+  Windows-source → Mac ownership lease only. Test and extend that path before
+  describing shortcut translation as universal.
 - **Release:** none made; existing 0.1.5/0.1.6 alpha artefacts remain separate.
 
 ## Blockers and ranked next work
