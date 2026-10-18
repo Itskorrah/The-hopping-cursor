@@ -2502,6 +2502,108 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn windows_to_mac_shortcut_bridge_preserves_order_on_the_control_queue() {
+        // Simulate the native capture boundary; the service's real HID mapping,
+        // ownership state, channel admission and outbound queue are exercised.
+        let dir = tempfile::tempdir().unwrap();
+        let service = start_test(dir.path().into(), Some(0), Arc::new(Headless::default()))
+            .await
+            .unwrap();
+        let mut mac = service.snapshot().local;
+        mac.id = "shortcut-test-mac".into();
+        mac.platform = "macos".into();
+        {
+            let mut state = service.state.lock().unwrap();
+            state.local.platform = "windows".into();
+            state.peers.insert(
+                mac.id.clone(),
+                PeerStatus {
+                    device: mac.clone(),
+                    address: "127.0.0.1:1".into(),
+                    public_key: None,
+                    safety_code: None,
+                    trusted: true,
+                    connected: true,
+                    latency_ms: None,
+                    last_error: None,
+                },
+            );
+            state.active = Some(Active {
+                peer: mac.id.clone(),
+                display: mac.displays[0].id.clone(),
+                x: 10.,
+                y: 10.,
+                return_x: 10.,
+                return_y: 10.,
+            });
+        }
+        let outbound = Arc::new(crate::outbound::Outbound::new(32));
+        let (priority, _urgent) = mpsc::unbounded_channel();
+        service.channels.lock().unwrap().insert(
+            mac.id.clone(),
+            Channel {
+                generation: "shortcut-test".into(),
+                preferred: true,
+                tx: outbound.clone(),
+                priority,
+                epoch: Arc::new(AtomicU64::new(0)),
+            },
+        );
+        for (code, down) in [
+            (226, true),  // Left Alt: ordinary Option.
+            (43, true),   // Tab: Option-up, Command-down, Tab-down.
+            (43, false),
+            (43, true),   // Repeated Tab keeps Command held.
+            (43, false),
+            (226, false), // Alt-up: Command-up, no lingering Option.
+        ] {
+            assert!(service.capture(CapturedEvent::Input(InputEvent::Key { code, down })));
+        }
+        for expected in [
+            InputEvent::Key { code: 226, down: true },
+            InputEvent::Key { code: 226, down: false },
+            InputEvent::Key { code: 227, down: true },
+            InputEvent::Key { code: 43, down: true },
+            InputEvent::Key { code: 43, down: false },
+            InputEvent::Key { code: 43, down: true },
+            InputEvent::Key { code: 43, down: false },
+            InputEvent::Key { code: 227, down: false },
+        ] {
+            let (_, message) = outbound.try_recv().expect("Missing ordered shortcut event");
+            let Message::Input(actual) = message else {
+                panic!("Unexpected non-input message in shortcut sequence");
+            };
+            assert_eq!(actual, expected);
+        }
+        assert!(outbound.try_recv().is_none());
+
+        // With the per-peer override disabled, Option and Tab must remain
+        // unchanged, even though the global mapping remains enabled.
+        {
+            let mut c = service.config.lock().unwrap();
+            c.settings.mac_alt_tab_peers.insert(mac.id.clone(), false);
+            service.update_routing(&c);
+        }
+        for (code, down) in [(226, true), (43, true), (43, false), (226, false)] {
+            assert!(service.capture(CapturedEvent::Input(InputEvent::Key { code, down })));
+        }
+        for expected in [
+            InputEvent::Key { code: 226, down: true },
+            InputEvent::Key { code: 43, down: true },
+            InputEvent::Key { code: 43, down: false },
+            InputEvent::Key { code: 226, down: false },
+        ] {
+            let (_, message) = outbound.try_recv().expect("Missing unmodified event");
+            let Message::Input(actual) = message else {
+                panic!("Unexpected non-input message in disabled mapping");
+            };
+            assert_eq!(actual, expected);
+        }
+        assert!(outbound.try_recv().is_none());
+        service.shutdown();
+    }
+
+    #[tokio::test]
     async fn remote_lease_is_queued_before_native_handoff_for_jump_and_edge() {
         // Fake only the OS boundary. The service, queues and ownership are real.
         struct ParkingBackend {
