@@ -2031,9 +2031,15 @@ impl Service {
                             right_alt_down: right_alt,
                         },
                     );
-                    drop(s);
+                    // Publish the whole modifier transition under the same
+                    // ownership lock used by the Windows keyboard/mouse hooks.
+                    // Otherwise a concurrent event could slip between the
+                    // synthetic Option-up, Command-down and Tab-down messages.
+                    // Sending only enqueues to the bounded local control queue;
+                    // it never waits for the peer or performs network I/O.
                     for event in events {
                         if !self.send(&id, Message::Input(event)) {
+                            drop(s);
                             self.release();
                             return false;
                         }
