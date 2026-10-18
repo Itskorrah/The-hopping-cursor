@@ -22,11 +22,18 @@
 
 - **Code inspection:** Windows/macOS input adapters, HID conversion, routing,
   crypto/control recovery, Tauri UI and workflows inspected.
-- **Automated checks:** the fresh PR workflow [run 39131429829](https://github.com/Itskorrah/The-hopping-cursor/actions/runs/39131429829)
-  failed before execution on 2026-10-19 (Sydney time): **all five jobs had
-  zero steps and no assigned runner**. This is an Actions allocation/account
-  blocker, not a Rust, TypeScript or native test result. Local Rust/Cargo
-  toolchains and physical paired machines are unavailable in this session.
+- **Automated checks:** fresh PR workflows failed before execution on
+  2026-10-19 (Sydney time): all five jobs had **zero steps and no assigned
+  runner**. This is an Actions allocation/account blocker, not a Rust,
+  TypeScript or native application result. Local Rust/Cargo toolchains and
+  physical paired machines are unavailable in this session. On the branch,
+  **18/18 targeted source-level checks** passed; these are not compiled tests.
+- **Local tooling:** [PR #4](https://github.com/Itskorrah/The-hopping-cursor/pull/4)
+  was independently verified and merged to main. Its exact committed source
+  passed five Node smoke tests, syntax checks, dry-run and failure-path
+  exercises. Main was merged into this feature branch so
+  `node scripts/verify-local.mjs` is now available here as well. No Cargo,
+  frontend or physical input pass has been claimed for this feature.
 - **Physical Windows+Mac:** unavailable to this session, so **unverified**.
 - **Remaining routing edge:** an *idle Windows keyboard* forwarded through the
   existing `SharedKey` path while a different computer owns the pointer still
