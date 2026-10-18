@@ -33,6 +33,11 @@
   uses the legacy modifier map; the new chord bridge applies to the active
   Windows-source → Mac ownership lease only. Test and extend that path before
   describing shortcut translation as universal.
+- **AltGr caveat:** some Windows layouts synthesise Left Ctrl when Right
+  Alt is pressed. The new Alt+Tab chord excludes Right Alt, but the existing
+  Ctrl-to-Command modifier feature may still alter international AltGr typing.
+  This needs physical language-layout tests and a separate, carefully scoped
+  fix; it is **not proven compatible**.
 - **Release:** none made; existing 0.1.5/0.1.6 alpha artefacts remain separate.
 
 ## Blockers and ranked next work
