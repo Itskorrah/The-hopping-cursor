@@ -8,7 +8,7 @@
   <p>
     A local-first desktop app for sharing a mouse, keyboard, clipboard and files
     between <strong>Windows</strong> and <strong>macOS</strong>.
-    No cloud account. No remote server. Just your computers, working together.
+    No cloud account. No external relay. Just your computers, working together.
   </p>
 
   <p>
@@ -108,7 +108,7 @@ Run these commands on **each** computer. The first build requires the native dep
 
 ### 3. Connect and share a workspace
 
-1. **Pair securely.** Open **Computers** on both machines. Use discovery or **Add computer** with a private address (for example, \`192.168.1.20:24810\`). Compare the **entire safety code** on both screens and approve on **both** devices.
+1. **Pair securely.** Open **Computers** on both machines. Use discovery or **Add computer** with a private address (for example, `192.168.1.20:24810`). Compare the **entire safety code** on both screens and approve on **both** devices.
 2. **Arrange your monitors.** Open **Workspace**, position the displays so their intended crossing edges touch and save. Use **Share arrangement** to offer the layout; the receiving computer must explicitly accept it.
 3. **Start sharing.** Resume sharing on both devices, then move your pointer towards a connected edge. Your keyboard follows the active controller. You can also select a monitor and use **Jump here** or assign **Ctrl+Alt+1–9** hop shortcuts.
 4. **Always know how to recover.** Press **Ctrl+Alt+Escape** on the **source computer** to return control locally. **Pause** also returns input locally and stops active sharing. Keep access to a local mouse and keyboard on each machine during alpha testing.
@@ -120,7 +120,7 @@ Closing the main window leaves the sharing engine running in the tray. Use **Qui
 
 **A local-first design, not a claim of a completed security audit.**
 
-- **Encrypted by design.** The control and file/clipboard channels use Noise \`XX_25519_ChaChaPoly_SHA256\`. There is no plaintext fallback.
+- **Encrypted by design.** The control and file/clipboard channels use Noise `XX_25519_ChaChaPoly_SHA256`. There is no plaintext fallback.
 - **No cloud identity.** There is no hosted account, analytics backend or internet relay. Discovery advertisements on your LAN still reveal device metadata such as the computer name and address.
 - **Trust is explicit.** Both machines must approve matching identity safety codes. Public keys are pinned, and unpairing revokes the relationship.
 - **Private keys stay local.** Native identity material is stored through macOS Keychain or Windows user-bound DPAPI, with conservative handling if protected storage is unavailable.
@@ -155,7 +155,7 @@ node scripts/verify-local.mjs
 node scripts/verify-local.mjs --native
 ~~~
 
-The verifier invokes Node smoke tests, Rust formatting, strict Clippy, Cargo tests, TypeScript checking, the frontend build and Playwright. Install dependencies with \`npm ci\` and Playwright Chromium with \`npx playwright install chromium\` first. It reports failing and missing steps rather than declaring an incomplete run successful.
+The verifier invokes Node smoke tests, Rust formatting, strict Clippy, Cargo tests, TypeScript checking, the frontend build and Playwright. Install dependencies with `npm ci` and Playwright Chromium with `npx playwright install chromium` first. It reports failing and missing steps rather than declaring an incomplete run successful.
 
 For individual development commands:
 
@@ -189,7 +189,7 @@ cargo run -p hopping-cursor -- identity
 cargo run -p hopping-cursor -- daemon
 ~~~
 
-Linux can run the encrypted headless network and transfer tests but does not have native global mouse/keyboard sharing here. For manual peer setup and isolated configuration directories, see the [development history](docs/README_HISTORY.md) or inspect \`crates/hop-cli/\`.
+Linux can run the encrypted headless network and transfer tests but does not have native global mouse/keyboard sharing here. For manual peer setup and isolated configuration directories, see the [development history](docs/README_HISTORY.md) or inspect `crates/hop-cli/`.
 
 </details>
 
@@ -198,7 +198,7 @@ Linux can run the encrypted headless network and transfer tests but does not hav
 The goal is a dependable cross-platform desktop experience. These are real boundaries, not hidden footnotes:
 
 - **Physical reliability:** Complete extended Windows↔Mac acceptance for duplicate/hidden cursors, the first key after handoff, scrolling, modifier keys, international layouts, disconnect/reconnect, sleep/wake, permissions and mixed-DPI desks.
-- **Windows-to-Mac shortcuts:** Alt+Tab → Command+Tab is under development in [PR #3](https://github.com/Itskorrah/The-hopping-cursor/pull/3), **not merged into \`main\`**. AltGr and non-US layouts still require careful native validation.
+- **Windows-to-Mac shortcuts:** Alt+Tab → Command+Tab is under development in [PR #3](https://github.com/Itskorrah/The-hopping-cursor/pull/3), **not merged into `main`**. AltGr and non-US layouts still require careful native validation.
 - **File workflows:** Native Finder/Explorer drag across screen boundaries, folders and file promises are not implemented. The current file transfer and file-clipboard workflows are explicit.
 - **System integration:** No Windows secure-desktop/UAC input injection, synchronized lock/wake, hardware display dimming, complete media-key support or true raw/relative gaming input.
 - **Distribution and assurance:** Installer signing/notarisation, tested automatic updates, external security review, measured end-to-end latency and broad hardware compatibility remain ahead.
