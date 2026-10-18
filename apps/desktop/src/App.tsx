@@ -1468,6 +1468,24 @@ export default function App() {
               />
             );
           })}
+          {permissionPeer.device.platform === "macos" &&
+            data.local.platform === "windows" && (
+              <Toggle
+                label="Use Windows Alt+Tab on this Mac"
+                description="Left Alt+Tab → Command+Tab; Left Alt+Shift+Tab reverses. Only applies while remotely controlling this Mac. Requires the global shortcut setting in Preferences. Right Alt/AltGr is unchanged."
+                on={data.settings.mac_alt_tab_peers[permissionPeer.device.id] ?? true}
+                change={() =>
+                  void change({
+                    mac_alt_tab_peers: {
+                      ...data.settings.mac_alt_tab_peers,
+                      [permissionPeer.device.id]: !(
+                        data.settings.mac_alt_tab_peers[permissionPeer.device.id] ?? true
+                      ),
+                    },
+                  })
+                }
+              />
+            )}
           <div className="dialog-actions">
             <button
               className="button primary"
@@ -1722,9 +1740,15 @@ function Preferences({
         />
         <Toggle
           label="Translate Command and Control"
-          description="Use familiar shortcuts when moving between Mac and Windows."
+          description="Map Windows Control to macOS Command (and the reverse) for familiar shortcuts."
           on={s.map_modifiers}
           change={() => change({ map_modifiers: !s.map_modifiers })}
+        />
+        <Toggle
+          label="Windows Alt+Tab → Mac Command+Tab"
+          description="While remotely controlling a Mac from Windows, Left Alt+Tab switches Mac apps. Hold Left Alt to cycle or add Shift to reverse. Right Alt/AltGr is untouched. Choose individual Macs under Computers."
+          on={s.mac_alt_tab}
+          change={() => change({ mac_alt_tab: !s.mac_alt_tab })}
         />
       </section>
       <section className="panel">

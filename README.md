@@ -28,6 +28,23 @@ directions and the E/emoji correction are owner-reported. Extended cursor
 visibility, scrolling, typing, directional feel and reconnect acceptance remain
 open.
 
+## Shortcut controls (review branch, native acceptance pending)
+
+On the **Windows source computer**, use **Preferences → Windows Alt+Tab →
+Mac Command+Tab** to enable or disable the optional mapping, and **Computers →
+Sharing permissions** for a connected Mac to opt that peer out. This feature is
+enabled by default when settings are migrated. With remote Mac input ownership:
+**Left Alt+Tab** switches Mac apps, holding Alt and pressing Tab cycles,
+**Left Alt+Shift+Tab** reverses, while **Right Alt/AltGr** and Ctrl+Alt+Tab
+remain unchanged. The existing **Ctrl+Alt+Esc** emergency key returns control
+locally. Windows Alt+Tab remains native when controlling Windows.
+
+The implementation adds routing and regression scenarios; **physical Windows
+shell interception and macOS Command+Tab injection are not yet accepted**.
+Hook removal/timeouts, protected desktops and privileged windows are outside
+the guarantee. See [the physical acceptance checklist](docs/SHORTCUT_ACCEPTANCE.md)
+and [product status](PRODUCT_STATUS.md).
+
 ## What's built
 
 - Noise XX encryption, persistent identities, matching safety codes, explicit approval on both computers, pinned keys, and revocation. No cloud account.

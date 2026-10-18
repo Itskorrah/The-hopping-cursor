@@ -31,6 +31,8 @@ export interface Settings {
   clipboard_html: boolean;
   clipboard_files: boolean;
   map_modifiers: boolean;
+  mac_alt_tab: boolean;
+  mac_alt_tab_peers: Record<string, boolean>;
   auto_accept_files: boolean;
   receive_directory: string;
   max_file_bytes: number;

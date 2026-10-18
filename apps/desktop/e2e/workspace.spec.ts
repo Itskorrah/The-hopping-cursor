@@ -535,3 +535,41 @@ test("shared layout review preserves unsaved edits and requires applying", async
   expect(saved.layout_offers).toEqual([]);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
+
+// A browser preview checks persistence and accessibility, not native hook interception.
+test("Windows-to-Mac shortcut mapping can be disabled globally and per Mac", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  const globalSwitch = page.getByRole("switch", {
+    name: "Windows Alt+Tab → Mac Command+Tab",
+  });
+  await expect(globalSwitch).toBeChecked();
+  await globalSwitch.click();
+  await expect(globalSwitch).not.toBeChecked();
+  await page.reload();
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await expect(globalSwitch).not.toBeChecked();
+  await globalSwitch.click();
+  await page.evaluate(() => {
+    const key = "hopping-cursor-interface-preview-v1";
+    const snapshot = JSON.parse(localStorage.getItem(key)!);
+    snapshot.local.platform = "windows";
+    snapshot.peers[0].device.platform = "macos";
+    localStorage.setItem(key, JSON.stringify(snapshot));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Computers", exact: true }).click();
+  await page.getByRole("button", { name: "Sharing permissions for Design PC" }).click();
+  const perPeer = page.getByRole("switch", { name: "Use Windows Alt+Tab on this Mac" });
+  await expect(perPeer).toBeChecked();
+  await perPeer.click();
+  await expect(perPeer).not.toBeChecked();
+  await expect.poll(async () =>
+    page.evaluate(() =>
+      JSON.parse(localStorage.getItem("hopping-cursor-interface-preview-v1")!)
+        .settings.mac_alt_tab_peers["pc-preview"]
+    )
+  ).toBe(false);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
