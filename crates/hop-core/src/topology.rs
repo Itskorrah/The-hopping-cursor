@@ -1,4 +1,4 @@
-use crate::model::{LayoutDisplay, Rect};
+use crate::model::{InputEvent, LayoutDisplay, Rect};
 use anyhow::Result;
 
 pub fn validate(layout: &[LayoutDisplay]) -> Result<()> {
@@ -182,9 +182,162 @@ pub fn map_key(code: u16, source: &str, target: &str, enabled: bool) -> u16 {
     }
 }
 
+/// Translate only an active Windows Left Alt+Tab chord on a remote Mac.
+/// The caller sends resulting events in order; Leave/ReleaseAll on ownership
+/// loss releases any synthetic modifier held by the destination.
+#[derive(Default)]
+pub struct WindowsMacShortcut {
+    switching: bool,
+}
+impl WindowsMacShortcut {
+    pub fn reset(&mut self) {
+        self.switching = false;
+    }
+
+    pub fn route(
+        &mut self,
+        event: InputEvent,
+        source: &str,
+        target: &str,
+        enabled: bool,
+        map_modifiers: bool,
+        left_alt_down: bool,
+        control_down: bool,
+        right_alt_down: bool,
+    ) -> Vec<InputEvent> {
+        let InputEvent::Key { code, down } = event else {
+            return vec![event];
+        };
+        let ordinary = |code: u16, down| InputEvent::Key {
+            code: map_key(code, source, target, map_modifiers),
+            down,
+        };
+        // HID usages: Left Alt=226, Right Alt/AltGr=230, Tab=43,
+        // Left Command=227, Left/Right Shift=225/229.
+        if self.switching {
+            if code == 226 {
+                if !down {
+                    self.switching = false;
+                    return vec![InputEvent::Key {
+                        code: 227,
+                        down: false,
+                    }];
+                }
+                return vec![]; // Repeated modifier-down must not re-press Option.
+            }
+            if down && !matches!(code, 43 | 225 | 229) {
+                // An unrelated key cancels the chord while keeping Alt held.
+                self.switching = false;
+                return vec![
+                    InputEvent::Key {
+                        code: 227,
+                        down: false,
+                    },
+                    ordinary(226, true),
+                    ordinary(code, down),
+                ];
+            }
+            return vec![ordinary(code, down)];
+        }
+        if enabled
+            && source == "windows"
+            && target == "macos"
+            && code == 43
+            && down
+            && left_alt_down
+            && !control_down
+            && !right_alt_down
+        {
+            self.switching = true;
+            return vec![
+                ordinary(226, false),
+                InputEvent::Key {
+                    code: 227,
+                    down: true,
+                },
+                ordinary(43, true),
+            ];
+        }
+        vec![ordinary(code, down)]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn k(code: u16, down: bool) -> InputEvent {
+        InputEvent::Key { code, down }
+    }
+    fn route(
+        bridge: &mut WindowsMacShortcut,
+        code: u16,
+        down: bool,
+        alt: bool,
+        ctrl: bool,
+        altgr: bool,
+        enabled: bool,
+    ) -> Vec<InputEvent> {
+        bridge.route(k(code, down), "windows", "macos", enabled, true, alt, ctrl, altgr)
+    }
+    #[test]
+    fn alt_tab_cycling_and_alt_release_are_balanced() {
+        let mut bridge = WindowsMacShortcut::default();
+        assert_eq!(route(&mut bridge, 226, true, true, false, false, true), vec![k(226, true)]);
+        assert_eq!(
+            route(&mut bridge, 43, true, true, false, false, true),
+            vec![k(226, false), k(227, true), k(43, true)]
+        );
+        assert_eq!(route(&mut bridge, 43, false, true, false, false, true), vec![k(43, false)]);
+        assert_eq!(route(&mut bridge, 43, true, true, false, false, true), vec![k(43, true)]);
+        assert_eq!(route(&mut bridge, 43, true, true, false, false, true), vec![k(43, true)]);
+        assert_eq!(route(&mut bridge, 43, false, true, false, false, true), vec![k(43, false)]);
+        assert!(route(&mut bridge, 226, true, true, false, false, true).is_empty());
+        assert_eq!(route(&mut bridge, 226, false, false, false, false, true), vec![k(227, false)]);
+    }
+    #[test]
+    fn reverse_cycling_and_other_keys_preserve_correct_modifiers() {
+        let mut bridge = WindowsMacShortcut::default();
+        assert_eq!(route(&mut bridge, 225, true, true, false, false, true), vec![k(225, true)]);
+        assert_eq!(
+            route(&mut bridge, 43, true, true, false, false, true),
+            vec![k(226, false), k(227, true), k(43, true)]
+        );
+        assert_eq!(route(&mut bridge, 43, false, true, false, false, true), vec![k(43, false)]);
+        assert_eq!(route(&mut bridge, 225, false, true, false, false, true), vec![k(225, false)]);
+        assert_eq!(
+            route(&mut bridge, 8, true, true, false, false, true),
+            vec![k(227, false), k(226, true), k(8, true)]
+        );
+        assert_eq!(route(&mut bridge, 226, false, false, false, false, true), vec![k(226, false)]);
+    }
+    #[test]
+    fn disabled_altgr_ctrl_and_non_mac_target_are_not_remapped() {
+        for (alt, ctrl, altgr, enabled) in [
+            (false, false, true, true),
+            (true, true, false, true),
+            (true, false, true, true),
+            (true, false, false, false),
+        ] {
+            let mut bridge = WindowsMacShortcut::default();
+            assert_eq!(route(&mut bridge, 43, true, alt, ctrl, altgr, enabled), vec![k(43, true)]);
+        }
+        let mut bridge = WindowsMacShortcut::default();
+        assert_eq!(
+            bridge.route(k(43, true), "windows", "windows", true, true, true, false, false),
+            vec![k(43, true)]
+        );
+        assert_eq!(
+            bridge.route(k(224, true), "windows", "macos", true, true, false, true, false),
+            vec![k(227, true)]
+        );
+    }
+    #[test]
+    fn handback_resets_chord_state_before_a_new_local_session() {
+        let mut bridge = WindowsMacShortcut::default();
+        route(&mut bridge, 43, true, true, false, false, true);
+        bridge.reset();
+        assert_eq!(route(&mut bridge, 226, false, false, false, false, true), vec![k(226, false)]);
+    }
     #[test]
     fn new_device_keeps_native_monitor_geometry_despite_enumeration_order() {
         let mut layout = vec![d("mac", 0., 0.)];

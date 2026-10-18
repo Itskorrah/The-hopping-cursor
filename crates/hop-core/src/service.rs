@@ -36,6 +36,7 @@ pub(crate) struct State {
     shared_keys: BTreeMap<String, BTreeSet<u16>>,
     pressed: BTreeSet<u16>,
     consumed: BTreeSet<u16>,
+    shortcut: topology::WindowsMacShortcut,
     local_position: (f64, f64),
     edge: Option<(String, Instant)>,
     buttons: BTreeSet<u8>,
@@ -232,6 +233,7 @@ impl Service {
                 shared_keys: BTreeMap::new(),
                 pressed: BTreeSet::new(),
                 consumed: BTreeSet::new(),
+                shortcut: topology::WindowsMacShortcut::default(),
                 local_position: initial_position,
                 edge: None,
                 buttons: BTreeSet::new(),
@@ -429,8 +431,11 @@ impl Service {
             Path::new(&settings.receive_directory).is_absolute(),
             "Receiving folder must be an absolute path"
         );
-        let should_release = settings.paused;
         let previous = self.routing.load();
+        let should_release = settings.paused
+            || settings.map_modifiers != previous.settings.map_modifiers
+            || settings.mac_alt_tab != previous.settings.mac_alt_tab
+            || settings.mac_alt_tab_peers != previous.settings.mac_alt_tab_peers;
         if previous.settings.clipboard_files != settings.clipboard_files {
             self.file_clipboard_hash.lock().unwrap().clear();
         }
@@ -635,6 +640,7 @@ impl Service {
             self.release();
             anyhow::bail!("Input queue unavailable; returned input locally");
         }
+        state.shortcut.reset();
         state.active = Some(Active {
             peer: device_id.into(),
             display: display_id.into(),
@@ -730,6 +736,7 @@ impl Service {
         let mut c = self.config.lock().unwrap();
         let mut next = c.clone();
         next.peers.remove(id);
+        next.settings.mac_alt_tab_peers.remove(id);
         next.layout.retain(|d| d.device_id != id);
         next.hop_keys.retain(|d| d.device_id != id);
         config::save(&self.config_dir, &next)?;
@@ -749,6 +756,7 @@ impl Service {
             s.edge = None;
             let away = s.away.take().is_some();
             s.shared_keys.clear();
+            s.shortcut.reset();
             (s.active.take(), s.inbound.take(), away)
         };
         let active_was_remote = active.is_some();
@@ -781,7 +789,10 @@ impl Service {
     fn sync_forwarding(&self) -> Result<()> {
         // Serialize cursor visibility with ownership. A release racing a hop
         // must not leave the source hidden after its active lease was cleared.
-        let state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        if state.active.is_none() {
+            state.shortcut.reset();
+        }
         self.backend
             .set_forwarding(state.active.is_some() || state.away.is_some())
     }
@@ -892,6 +903,7 @@ impl Service {
         state.pressed.clear();
         state.buttons.clear();
         state.consumed.clear();
+        state.shortcut.reset();
     }
     pub fn recover_session_gap(&self) {
         // Clear stale physical state before release can restore held modifiers.
@@ -1690,6 +1702,7 @@ impl Service {
             state.pressed.clear();
             state.buttons.clear();
             state.consumed.clear();
+            state.shortcut.reset();
             drop(state);
             self.release();
             return false;
@@ -1920,6 +1933,9 @@ impl Service {
                                     self.release();
                                     return false;
                                 }
+                                if !same_peer {
+                                    s.shortcut.reset();
+                                }
                                 s.active = Some(Active {
                                     peer: peer.clone(),
                                     display: next.display_id.clone(),
@@ -1989,7 +2005,7 @@ impl Service {
                 }
                 false
             }
-            CapturedEvent::Input(mut input) => {
+            CapturedEvent::Input(input) => {
                 if let Some(a) = &s.active {
                     let id = a.peer.clone();
                     let target = s
@@ -1998,17 +2014,29 @@ impl Service {
                         .map(|p| p.device.platform.clone())
                         .unwrap_or_default();
                     let source = s.local.platform.clone();
+                    let enabled = c.settings.mac_alt_tab
+                        && c.settings.mac_alt_tab_peers.get(&id).copied().unwrap_or(true);
+                    let left_alt = s.pressed.contains(&226);
+                    let control = s.pressed.contains(&224) || s.pressed.contains(&228);
+                    let right_alt = s.pressed.contains(&230);
+                    let events = s.shortcut.route(
+                        input,
+                        &source,
+                        &target,
+                        enabled,
+                        c.settings.map_modifiers,
+                        left_alt,
+                        control,
+                        right_alt,
+                    );
                     drop(s);
-                    if let InputEvent::Key { code, .. } = &mut input {
-                        *code =
-                            topology::map_key(*code, &source, &target, c.settings.map_modifiers);
+                    for event in events {
+                        if !self.send(&id, Message::Input(event)) {
+                            self.release();
+                            return false;
+                        }
                     }
-                    if self.send(&id, Message::Input(input)) {
-                        true
-                    } else {
-                        self.release();
-                        false
-                    }
+                    true
                 } else {
                     false
                 }
