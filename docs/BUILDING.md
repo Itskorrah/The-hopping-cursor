@@ -29,8 +29,8 @@ failure summary and exits nonzero if **any** check failed or could not start.
 This is a **developer build/automation gate**, not evidence of real
 Windows keyboard hook interception, macOS Command+Tab, pairing security or
 two-machine cursor/file acceptance. Those require the physical checklist in
-[platform testing](PLATFORM_TESTING.md) and, for Alt+Tab, the
-[shortcut acceptance plan](SHORTCUT_ACCEPTANCE.md) on the feature branch.
+[platform testing](PLATFORM_TESTING.md). The Windows-to-Mac Alt+Tab physical
+acceptance plan is tracked in [PR #3](https://github.com/Itskorrah/The-hopping-cursor/pull/3).
 
 ## Windows x64 on Windows
 
