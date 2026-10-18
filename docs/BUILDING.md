@@ -4,6 +4,34 @@ Installers are development packages. Keep the current app's configuration and
 protected identity when updating. Fully quit the engine before running an
 installer; closing its window leaves the tray engine running.
 
+## Local verification without GitHub Actions
+
+Use the same checkout/commit you intend to ship. Install Node.js 22+ and
+stable Rust (including rustfmt and Clippy), then run `npm ci` from the repository
+root. Install Playwright Chromium separately if it is not already available,
+for example `npx playwright install chromium`, and install the normal operating
+system prerequisites described below. The verifier never installs anything,
+changes credentials, enables billing or alters application configuration.
+
+```sh
+node scripts/verify-local.mjs --dry-run
+node scripts/verify-local.mjs
+# On Windows or macOS only; include a native installer package build:
+node scripts/verify-local.mjs --native
+```
+
+The verifier runs its own Node smoke tests, `cargo fmt --check`, strict
+Clippy, Cargo unit/integration tests, TypeScript type checking, frontend build
+and Playwright tests. It continues after an individual failed check, prints a
+failure summary and exits nonzero if **any** check failed or could not start.
+`--dry-run` lists commands without validating their execution.
+
+This is a **developer build/automation gate**, not evidence of real
+Windows keyboard hook interception, macOS Command+Tab, pairing security or
+two-machine cursor/file acceptance. Those require the physical checklist in
+[platform testing](PLATFORM_TESTING.md) and, for Alt+Tab, the
+[shortcut acceptance plan](SHORTCUT_ACCEPTANCE.md) on the feature branch.
+
 ## Windows x64 on Windows
 
 On this Windows development PC, a machine-wide Build Tools install was rejected
