@@ -182,6 +182,18 @@ pub fn map_key(code: u16, source: &str, target: &str, enabled: bool) -> u16 {
     }
 }
 
+/// Inputs for one routed physical key event. Keep the source ownership and
+/// modifier snapshot together to avoid accidental global key translation.
+pub struct ShortcutContext<'a> {
+    pub source: &'a str,
+    pub target: &'a str,
+    pub enabled: bool,
+    pub map_modifiers: bool,
+    pub left_alt_down: bool,
+    pub control_down: bool,
+    pub right_alt_down: bool,
+}
+
 /// Translate only an active Windows Left Alt+Tab chord on a remote Mac.
 /// The caller sends resulting events in order; Leave/ReleaseAll on ownership
 /// loss releases any synthetic modifier held by the destination.
@@ -197,14 +209,17 @@ impl WindowsMacShortcut {
     pub fn route(
         &mut self,
         event: InputEvent,
-        source: &str,
-        target: &str,
-        enabled: bool,
-        map_modifiers: bool,
-        left_alt_down: bool,
-        control_down: bool,
-        right_alt_down: bool,
+        context: ShortcutContext<'_>,
     ) -> Vec<InputEvent> {
+        let ShortcutContext {
+            source,
+            target,
+            enabled,
+            map_modifiers,
+            left_alt_down,
+            control_down,
+            right_alt_down,
+        } = context;
         let InputEvent::Key { code, down } = event else {
             return vec![event];
         };
@@ -277,7 +292,18 @@ mod tests {
         altgr: bool,
         enabled: bool,
     ) -> Vec<InputEvent> {
-        bridge.route(k(code, down), "windows", "macos", enabled, true, alt, ctrl, altgr)
+        bridge.route(
+            k(code, down),
+            ShortcutContext {
+                source: "windows",
+                target: "macos",
+                enabled,
+                map_modifiers: true,
+                left_alt_down: alt,
+                control_down: ctrl,
+                right_alt_down: altgr,
+            },
+        )
     }
     #[test]
     fn alt_tab_cycling_and_alt_release_are_balanced() {
@@ -323,17 +349,40 @@ mod tests {
         }
         let mut bridge = WindowsMacShortcut::default();
         assert_eq!(
-            bridge.route(k(43, true), "windows", "windows", true, true, true, false, false),
+            bridge.route(
+                k(43, true),
+                ShortcutContext {
+                    source: "windows",
+                    target: "windows",
+                    enabled: true,
+                    map_modifiers: true,
+                    left_alt_down: true,
+                    control_down: false,
+                    right_alt_down: false,
+                },
+            ),
             vec![k(43, true)]
         );
         assert_eq!(
-            bridge.route(k(224, true), "windows", "macos", true, true, false, true, false),
+            bridge.route(
+                k(224, true),
+                ShortcutContext {
+                    source: "windows",
+                    target: "macos",
+                    enabled: true,
+                    map_modifiers: true,
+                    left_alt_down: false,
+                    control_down: true,
+                    right_alt_down: false,
+                },
+            ),
             vec![k(227, true)]
         );
     }
     #[test]
     fn handback_resets_chord_state_before_a_new_local_session() {
         let mut bridge = WindowsMacShortcut::default();
+        route(&mut bridge, 226, true, true, false, false, true);
         route(&mut bridge, 43, true, true, false, false, true);
         bridge.reset();
         assert_eq!(route(&mut bridge, 226, false, false, false, false, true), vec![k(226, false)]);

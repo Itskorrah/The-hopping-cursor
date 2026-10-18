@@ -2021,13 +2021,15 @@ impl Service {
                     let right_alt = s.pressed.contains(&230);
                     let events = s.shortcut.route(
                         input,
-                        &source,
-                        &target,
-                        enabled,
-                        c.settings.map_modifiers,
-                        left_alt,
-                        control,
-                        right_alt,
+                        topology::ShortcutContext {
+                            source: &source,
+                            target: &target,
+                            enabled,
+                            map_modifiers: c.settings.map_modifiers,
+                            left_alt_down: left_alt,
+                            control_down: control,
+                            right_alt_down: right_alt,
+                        },
                     );
                     drop(s);
                     for event in events {
