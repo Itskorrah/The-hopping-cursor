@@ -1472,7 +1472,7 @@ export default function App() {
             data.local.platform === "windows" && (
               <Toggle
                 label="Use Windows Alt+Tab on this Mac"
-                description="Left Alt+Tab → Command+Tab; Left Alt+Shift+Tab reverses. Only applies while remotely controlling this Mac. Requires the global shortcut setting in Preferences. Right Alt/AltGr is unchanged."
+                description="Left Alt+Tab → Command+Tab; Left Alt+Shift+Tab reverses. Only applies while remotely controlling this Mac. Requires the global shortcut setting in Preferences. Right Alt does not activate this shortcut; AltGr and IMEs still require hardware testing."
                 on={data.settings.mac_alt_tab_peers[permissionPeer.device.id] ?? true}
                 change={() =>
                   void change({
@@ -1746,7 +1746,7 @@ function Preferences({
         />
         <Toggle
           label="Windows Alt+Tab → Mac Command+Tab"
-          description="While remotely controlling a Mac from Windows, Left Alt+Tab switches Mac apps. Hold Left Alt to cycle or add Shift to reverse. Right Alt/AltGr is untouched. Choose individual Macs under Computers."
+          description="While remotely controlling a Mac from Windows, Left Alt+Tab switches Mac apps. Hold Left Alt to cycle or add Shift to reverse. Right Alt does not activate this mapping. International AltGr typing still needs hardware verification when Control-to-Command translation is enabled. Choose individual Macs under Computers."
           on={s.mac_alt_tab}
           change={() => change({ mac_alt_tab: !s.mac_alt_tab })}
         />
