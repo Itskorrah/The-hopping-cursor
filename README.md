@@ -30,9 +30,29 @@
 ---
 
 > [!IMPORTANT]
-> **Development alpha · v0.1.6 source tree.** The core application is implemented and basic Windows↔Mac control has been user-reported, but broader physical input, cursor visibility, permissions and reconnect testing remains open. Current packages are **not signed or notarised for public production distribution**. This is a project for controlled testing, not yet a dependable replacement for a mature software KVM.
+> **Development alpha · v0.1.7-pr3.1 PR #3 test build.** The core application is implemented and basic Windows↔Mac control has been user-reported, but broader physical input, cursor visibility, permissions and reconnect testing remains open. Current packages are **not signed or notarised for public production distribution**. This is a project for controlled testing, not yet a dependable replacement for a mature software KVM.
+
+## Shortcut controls (review branch, native acceptance pending)
+
+On the **Windows source computer**, use **Preferences → Windows Alt+Tab →
+Mac Command+Tab** to enable or disable the optional mapping, and **Computers →
+Sharing permissions** for a connected Mac to opt that peer out. This feature is
+enabled by default when settings are migrated. With remote Mac input ownership:
+**Left Alt+Tab** switches Mac apps, holding Alt and pressing Tab cycles,
+**Left Alt+Shift+Tab** reverses, while **Right Alt/AltGr** and Ctrl+Alt+Tab
+remain unchanged. The existing **Ctrl+Alt+Esc** emergency key returns control
+locally. Windows Alt+Tab remains native when controlling Windows.
+
+The implementation adds routing and regression scenarios; **physical Windows
+shell interception and macOS Command+Tab injection are not yet accepted**.
+Hook removal/timeouts, protected desktops and privileged windows are outside
+the guarantee. See [the physical acceptance checklist](docs/SHORTCUT_ACCEPTANCE.md)
+and [product status](PRODUCT_STATUS.md).
+
+See [PR #3 handover](docs/PR3_HANDOVER.md) for the Windows installer, Mac build prompt and physical test order. Local checks replace hosted Actions for this test build; physical acceptance remains open.
 
 ## See it in action
+
 
 <p align="center">
   <img src="docs/images/workspace.jpg" width="900" alt="Actual macOS desktop app showing its workspace, a paired Windows PC and three arranged displays" />

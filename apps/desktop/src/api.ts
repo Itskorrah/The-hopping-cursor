@@ -28,6 +28,8 @@ const sample: Snapshot = {
     clipboard_html: true,
     clipboard_files: false,
     map_modifiers: true,
+    mac_alt_tab: true,
+    mac_alt_tab_peers: {},
     auto_accept_files: false,
     receive_directory: "/Users/you/Downloads/Hopping Cursor",
     max_file_bytes: 10737418240,
@@ -117,6 +119,8 @@ try {
 }
 preview.layout_offers ??= [];
 preview.settings.clipboard_files ??= false;
+preview.settings.mac_alt_tab ??= true;
+preview.settings.mac_alt_tab_peers ??= {};
 preview.profiles ??= [];
 preview.hop_keys ??= [];
 preview.peer_permissions ??= {};

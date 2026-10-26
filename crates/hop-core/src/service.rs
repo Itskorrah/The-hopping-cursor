@@ -36,6 +36,7 @@ pub(crate) struct State {
     shared_keys: BTreeMap<String, BTreeSet<u16>>,
     pressed: BTreeSet<u16>,
     consumed: BTreeSet<u16>,
+    shortcut: topology::WindowsMacShortcut,
     local_position: (f64, f64),
     edge: Option<(String, Instant)>,
     buttons: BTreeSet<u8>,
@@ -232,6 +233,7 @@ impl Service {
                 shared_keys: BTreeMap::new(),
                 pressed: BTreeSet::new(),
                 consumed: BTreeSet::new(),
+                shortcut: topology::WindowsMacShortcut::default(),
                 local_position: initial_position,
                 edge: None,
                 buttons: BTreeSet::new(),
@@ -429,8 +431,11 @@ impl Service {
             Path::new(&settings.receive_directory).is_absolute(),
             "Receiving folder must be an absolute path"
         );
-        let should_release = settings.paused;
         let previous = self.routing.load();
+        let should_release = settings.paused
+            || settings.map_modifiers != previous.settings.map_modifiers
+            || settings.mac_alt_tab != previous.settings.mac_alt_tab
+            || settings.mac_alt_tab_peers != previous.settings.mac_alt_tab_peers;
         if previous.settings.clipboard_files != settings.clipboard_files {
             self.file_clipboard_hash.lock().unwrap().clear();
         }
@@ -635,6 +640,7 @@ impl Service {
             self.release();
             anyhow::bail!("Input queue unavailable; returned input locally");
         }
+        state.shortcut.reset();
         state.active = Some(Active {
             peer: device_id.into(),
             display: display_id.into(),
@@ -730,6 +736,7 @@ impl Service {
         let mut c = self.config.lock().unwrap();
         let mut next = c.clone();
         next.peers.remove(id);
+        next.settings.mac_alt_tab_peers.remove(id);
         next.layout.retain(|d| d.device_id != id);
         next.hop_keys.retain(|d| d.device_id != id);
         config::save(&self.config_dir, &next)?;
@@ -749,6 +756,7 @@ impl Service {
             s.edge = None;
             let away = s.away.take().is_some();
             s.shared_keys.clear();
+            s.shortcut.reset();
             (s.active.take(), s.inbound.take(), away)
         };
         let active_was_remote = active.is_some();
@@ -781,7 +789,10 @@ impl Service {
     fn sync_forwarding(&self) -> Result<()> {
         // Serialize cursor visibility with ownership. A release racing a hop
         // must not leave the source hidden after its active lease was cleared.
-        let state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        if state.active.is_none() {
+            state.shortcut.reset();
+        }
         self.backend
             .set_forwarding(state.active.is_some() || state.away.is_some())
     }
@@ -892,6 +903,7 @@ impl Service {
         state.pressed.clear();
         state.buttons.clear();
         state.consumed.clear();
+        state.shortcut.reset();
     }
     pub fn recover_session_gap(&self) {
         // Clear stale physical state before release can restore held modifiers.
@@ -1690,6 +1702,7 @@ impl Service {
             state.pressed.clear();
             state.buttons.clear();
             state.consumed.clear();
+            state.shortcut.reset();
             drop(state);
             self.release();
             return false;
@@ -1920,6 +1933,9 @@ impl Service {
                                     self.release();
                                     return false;
                                 }
+                                if !same_peer {
+                                    s.shortcut.reset();
+                                }
                                 s.active = Some(Active {
                                     peer: peer.clone(),
                                     display: next.display_id.clone(),
@@ -1989,7 +2005,7 @@ impl Service {
                 }
                 false
             }
-            CapturedEvent::Input(mut input) => {
+            CapturedEvent::Input(input) => {
                 if let Some(a) = &s.active {
                     let id = a.peer.clone();
                     let target = s
@@ -1998,17 +2014,41 @@ impl Service {
                         .map(|p| p.device.platform.clone())
                         .unwrap_or_default();
                     let source = s.local.platform.clone();
-                    drop(s);
-                    if let InputEvent::Key { code, .. } = &mut input {
-                        *code =
-                            topology::map_key(*code, &source, &target, c.settings.map_modifiers);
+                    let enabled = c.settings.mac_alt_tab
+                        && c.settings
+                            .mac_alt_tab_peers
+                            .get(&id)
+                            .copied()
+                            .unwrap_or(true);
+                    let left_alt = s.pressed.contains(&226);
+                    let control = s.pressed.contains(&224) || s.pressed.contains(&228);
+                    let right_alt = s.pressed.contains(&230);
+                    let events = s.shortcut.route(
+                        input,
+                        topology::ShortcutContext {
+                            source: &source,
+                            target: &target,
+                            enabled,
+                            map_modifiers: c.settings.map_modifiers,
+                            left_alt_down: left_alt,
+                            control_down: control,
+                            right_alt_down: right_alt,
+                        },
+                    );
+                    // Publish the whole modifier transition under the same
+                    // ownership lock used by the Windows keyboard/mouse hooks.
+                    // Otherwise a concurrent event could slip between the
+                    // synthetic Option-up, Command-down and Tab-down messages.
+                    // Sending only enqueues to the bounded local control queue;
+                    // it never waits for the peer or performs network I/O.
+                    for event in events {
+                        if !self.send(&id, Message::Input(event)) {
+                            drop(s);
+                            self.release();
+                            return false;
+                        }
                     }
-                    if self.send(&id, Message::Input(input)) {
-                        true
-                    } else {
-                        self.release();
-                        false
-                    }
+                    true
                 } else {
                     false
                 }
@@ -2465,6 +2505,257 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn windows_to_mac_shortcut_bridge_preserves_order_on_the_control_queue() {
+        // Simulate the native capture boundary; the service's real HID mapping,
+        // ownership state, channel admission and outbound queue are exercised.
+        let dir = tempfile::tempdir().unwrap();
+        let service = start_test(dir.path().into(), Some(0), Arc::new(Headless::default()))
+            .await
+            .unwrap();
+        let mut mac = service.snapshot().local;
+        mac.id = "shortcut-test-mac".into();
+        mac.platform = "macos".into();
+        {
+            let mut state = service.state.lock().unwrap();
+            state.local.platform = "windows".into();
+            state.peers.insert(
+                mac.id.clone(),
+                PeerStatus {
+                    device: mac.clone(),
+                    address: "127.0.0.1:1".into(),
+                    public_key: None,
+                    safety_code: None,
+                    trusted: true,
+                    connected: true,
+                    latency_ms: None,
+                    last_error: None,
+                },
+            );
+            state.active = Some(Active {
+                peer: mac.id.clone(),
+                display: mac.displays[0].id.clone(),
+                x: 10.,
+                y: 10.,
+                return_x: 10.,
+                return_y: 10.,
+            });
+        }
+        let outbound = Arc::new(crate::outbound::Outbound::new(32));
+        let (priority, _urgent) = mpsc::unbounded_channel();
+        service.channels.lock().unwrap().insert(
+            mac.id.clone(),
+            Channel {
+                generation: "shortcut-test".into(),
+                preferred: true,
+                tx: outbound.clone(),
+                priority,
+                epoch: Arc::new(AtomicU64::new(0)),
+            },
+        );
+        for (code, down) in [
+            (226, true), // Left Alt: ordinary Option.
+            (43, true),  // Tab: Option-up, Command-down, Tab-down.
+            (43, false),
+            (43, true), // Repeated Tab keeps Command held.
+            (43, false),
+            (226, false), // Alt-up: Command-up, no lingering Option.
+        ] {
+            assert!(service.capture(CapturedEvent::Input(InputEvent::Key { code, down })));
+        }
+        for expected in [
+            InputEvent::Key {
+                code: 226,
+                down: true,
+            },
+            InputEvent::Key {
+                code: 226,
+                down: false,
+            },
+            InputEvent::Key {
+                code: 227,
+                down: true,
+            },
+            InputEvent::Key {
+                code: 43,
+                down: true,
+            },
+            InputEvent::Key {
+                code: 43,
+                down: false,
+            },
+            InputEvent::Key {
+                code: 43,
+                down: true,
+            },
+            InputEvent::Key {
+                code: 43,
+                down: false,
+            },
+            InputEvent::Key {
+                code: 227,
+                down: false,
+            },
+        ] {
+            let (_, message) = outbound.try_recv().expect("Missing ordered shortcut event");
+            let Message::Input(actual) = message else {
+                panic!("Unexpected non-input message in shortcut sequence");
+            };
+            assert_eq!(actual, expected);
+        }
+        assert!(outbound.try_recv().is_none());
+
+        // With the per-peer override disabled, Option and Tab must remain
+        // unchanged, even though the global mapping remains enabled.
+        {
+            let mut c = service.config.lock().unwrap();
+            c.settings.mac_alt_tab_peers.insert(mac.id.clone(), false);
+            service.update_routing(&c);
+        }
+        for (code, down) in [(226, true), (43, true), (43, false), (226, false)] {
+            assert!(service.capture(CapturedEvent::Input(InputEvent::Key { code, down })));
+        }
+        for expected in [
+            InputEvent::Key {
+                code: 226,
+                down: true,
+            },
+            InputEvent::Key {
+                code: 43,
+                down: true,
+            },
+            InputEvent::Key {
+                code: 43,
+                down: false,
+            },
+            InputEvent::Key {
+                code: 226,
+                down: false,
+            },
+        ] {
+            let (_, message) = outbound.try_recv().expect("Missing unmodified event");
+            let Message::Input(actual) = message else {
+                panic!("Unexpected non-input message in disabled mapping");
+            };
+            assert_eq!(actual, expected);
+        }
+        assert!(outbound.try_recv().is_none());
+        service.shutdown();
+    }
+
+    #[tokio::test]
+    async fn emergency_capture_recovers_when_bridge_cancel_hits_full_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = start_test(dir.path().into(), Some(0), Arc::new(Headless::default()))
+            .await
+            .unwrap();
+        let mut mac = service.snapshot().local;
+        mac.id = "shortcut-emergency-test-mac".into();
+        mac.platform = "macos".into();
+        {
+            let mut state = service.state.lock().unwrap();
+            state.local.platform = "windows".into();
+            state.peers.insert(
+                mac.id.clone(),
+                PeerStatus {
+                    device: mac.clone(),
+                    address: "127.0.0.1:1".into(),
+                    public_key: None,
+                    safety_code: None,
+                    trusted: true,
+                    connected: true,
+                    latency_ms: None,
+                    last_error: None,
+                },
+            );
+            state.active = Some(Active {
+                peer: mac.id.clone(),
+                display: mac.displays[0].id.clone(),
+                x: 10.,
+                y: 10.,
+                return_x: 10.,
+                return_y: 10.,
+            });
+        }
+
+        let outbound = Arc::new(crate::outbound::Outbound::new(8));
+        let (priority, mut urgent) = mpsc::unbounded_channel();
+        let epoch = Arc::new(AtomicU64::new(0));
+        service.channels.lock().unwrap().insert(
+            mac.id.clone(),
+            Channel {
+                generation: "shortcut-emergency-test".into(),
+                preferred: true,
+                tx: outbound.clone(),
+                priority,
+                epoch: epoch.clone(),
+            },
+        );
+
+        for (code, down) in [(226, true), (43, true)] {
+            assert!(service.capture(CapturedEvent::Input(InputEvent::Key { code, down })));
+        }
+        let mut delivered = Vec::new();
+        while let Some((_, message)) = outbound.try_recv() {
+            let Message::Input(event) = message else {
+                panic!("Unexpected non-input message in shortcut sequence");
+            };
+            delivered.push(event);
+        }
+        assert_eq!(
+            delivered,
+            vec![
+                InputEvent::Key {
+                    code: 226,
+                    down: true
+                },
+                InputEvent::Key {
+                    code: 226,
+                    down: false
+                },
+                InputEvent::Key {
+                    code: 227,
+                    down: true
+                },
+                InputEvent::Key {
+                    code: 43,
+                    down: true
+                },
+            ]
+        );
+
+        let queued_epoch = epoch.load(Ordering::SeqCst);
+        let mut queued = 0;
+        while outbound.try_send((
+            queued_epoch,
+            Message::Input(InputEvent::Key {
+                code: 4,
+                down: true,
+            }),
+        )) {
+            queued += 1;
+        }
+        assert!(queued > 0, "The normal input queue should be saturated");
+
+        // Ctrl cancels the bridged chord. Its Command-up cannot enter the full
+        // normal queue, so the service must recover the peer through Leave.
+        assert!(!service.capture(CapturedEvent::Input(InputEvent::Key {
+            code: 224,
+            down: true,
+        })));
+        assert!(service.capture(CapturedEvent::Input(InputEvent::Key {
+            code: 41,
+            down: true,
+        })));
+        assert!(matches!(urgent.recv().await, Some(Message::Leave)));
+        assert!(service.state.lock().unwrap().active.is_none());
+        assert_ne!(
+            queued_epoch,
+            epoch.load(Ordering::SeqCst),
+            "Queued input must be invalidated after emergency handback"
+        );
+        service.shutdown();
+    }
     #[tokio::test]
     async fn remote_lease_is_queued_before_native_handoff_for_jump_and_edge() {
         // Fake only the OS boundary. The service, queues and ownership are real.

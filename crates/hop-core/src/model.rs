@@ -68,6 +68,10 @@ pub struct Settings {
     pub clipboard_html: bool,
     pub clipboard_files: bool,
     pub map_modifiers: bool,
+    /// Windows Left Alt+Tab becomes Command+Tab only while controlling a Mac.
+    pub mac_alt_tab: bool,
+    /// Identity-keyed per-Mac opt-outs; peers absent from the map are enabled.
+    pub mac_alt_tab_peers: BTreeMap<String, bool>,
     pub auto_accept_files: bool,
     pub receive_directory: String,
     pub max_file_bytes: u64,
@@ -87,6 +91,8 @@ impl Default for Settings {
             clipboard_html: true,
             clipboard_files: false,
             map_modifiers: true,
+            mac_alt_tab: true,
+            mac_alt_tab_peers: BTreeMap::new(),
             auto_accept_files: false,
             receive_directory: String::new(),
             max_file_bytes: 10 * 1024 * 1024 * 1024,
