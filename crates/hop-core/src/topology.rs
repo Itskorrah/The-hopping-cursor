@@ -206,11 +206,7 @@ impl WindowsMacShortcut {
         self.switching = false;
     }
 
-    pub fn route(
-        &mut self,
-        event: InputEvent,
-        context: ShortcutContext<'_>,
-    ) -> Vec<InputEvent> {
+    pub fn route(&mut self, event: InputEvent, context: ShortcutContext<'_>) -> Vec<InputEvent> {
         let ShortcutContext {
             source,
             target,
@@ -308,33 +304,63 @@ mod tests {
     #[test]
     fn alt_tab_cycling_and_alt_release_are_balanced() {
         let mut bridge = WindowsMacShortcut::default();
-        assert_eq!(route(&mut bridge, 226, true, true, false, false, true), vec![k(226, true)]);
+        assert_eq!(
+            route(&mut bridge, 226, true, true, false, false, true),
+            vec![k(226, true)]
+        );
         assert_eq!(
             route(&mut bridge, 43, true, true, false, false, true),
             vec![k(226, false), k(227, true), k(43, true)]
         );
-        assert_eq!(route(&mut bridge, 43, false, true, false, false, true), vec![k(43, false)]);
-        assert_eq!(route(&mut bridge, 43, true, true, false, false, true), vec![k(43, true)]);
-        assert_eq!(route(&mut bridge, 43, true, true, false, false, true), vec![k(43, true)]);
-        assert_eq!(route(&mut bridge, 43, false, true, false, false, true), vec![k(43, false)]);
+        assert_eq!(
+            route(&mut bridge, 43, false, true, false, false, true),
+            vec![k(43, false)]
+        );
+        assert_eq!(
+            route(&mut bridge, 43, true, true, false, false, true),
+            vec![k(43, true)]
+        );
+        assert_eq!(
+            route(&mut bridge, 43, true, true, false, false, true),
+            vec![k(43, true)]
+        );
+        assert_eq!(
+            route(&mut bridge, 43, false, true, false, false, true),
+            vec![k(43, false)]
+        );
         assert!(route(&mut bridge, 226, true, true, false, false, true).is_empty());
-        assert_eq!(route(&mut bridge, 226, false, false, false, false, true), vec![k(227, false)]);
+        assert_eq!(
+            route(&mut bridge, 226, false, false, false, false, true),
+            vec![k(227, false)]
+        );
     }
     #[test]
     fn reverse_cycling_and_other_keys_preserve_correct_modifiers() {
         let mut bridge = WindowsMacShortcut::default();
-        assert_eq!(route(&mut bridge, 225, true, true, false, false, true), vec![k(225, true)]);
+        assert_eq!(
+            route(&mut bridge, 225, true, true, false, false, true),
+            vec![k(225, true)]
+        );
         assert_eq!(
             route(&mut bridge, 43, true, true, false, false, true),
             vec![k(226, false), k(227, true), k(43, true)]
         );
-        assert_eq!(route(&mut bridge, 43, false, true, false, false, true), vec![k(43, false)]);
-        assert_eq!(route(&mut bridge, 225, false, true, false, false, true), vec![k(225, false)]);
+        assert_eq!(
+            route(&mut bridge, 43, false, true, false, false, true),
+            vec![k(43, false)]
+        );
+        assert_eq!(
+            route(&mut bridge, 225, false, true, false, false, true),
+            vec![k(225, false)]
+        );
         assert_eq!(
             route(&mut bridge, 8, true, true, false, false, true),
             vec![k(227, false), k(226, true), k(8, true)]
         );
-        assert_eq!(route(&mut bridge, 226, false, false, false, false, true), vec![k(226, false)]);
+        assert_eq!(
+            route(&mut bridge, 226, false, false, false, false, true),
+            vec![k(226, false)]
+        );
     }
     #[test]
     fn disabled_altgr_ctrl_and_non_mac_target_are_not_remapped() {
@@ -345,7 +371,10 @@ mod tests {
             (true, false, false, false),
         ] {
             let mut bridge = WindowsMacShortcut::default();
-            assert_eq!(route(&mut bridge, 43, true, alt, ctrl, altgr, enabled), vec![k(43, true)]);
+            assert_eq!(
+                route(&mut bridge, 43, true, alt, ctrl, altgr, enabled),
+                vec![k(43, true)]
+            );
         }
         let mut bridge = WindowsMacShortcut::default();
         assert_eq!(
@@ -385,7 +414,10 @@ mod tests {
         route(&mut bridge, 226, true, true, false, false, true);
         route(&mut bridge, 43, true, true, false, false, true);
         bridge.reset();
-        assert_eq!(route(&mut bridge, 226, false, false, false, false, true), vec![k(226, false)]);
+        assert_eq!(
+            route(&mut bridge, 226, false, false, false, false, true),
+            vec![k(226, false)]
+        );
     }
     #[test]
     fn new_device_keeps_native_monitor_geometry_despite_enumeration_order() {

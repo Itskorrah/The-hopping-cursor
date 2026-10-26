@@ -28,8 +28,10 @@ guided a constrained change; no unreviewed helper scripts were executed.
 
 ## Physical Windows + Mac test matrix
 
-1. On each computer install a build of this PR. Pair, compare the safety
-   code, grant only normal macOS Accessibility/Input Monitoring permissions,
+1. Follow [PR3_HANDOVER.md](PR3_HANDOVER.md) for matching 0.1.7-pr3.1 builds
+   from the exact delivered source commit. Preserve existing pairing; compare
+   the safety code if pairing is genuinely needed. Grant only normal
+   macOS Accessibility/Input Monitoring permissions,
    and use the same private LAN. Keep a separate recovery keyboard/mouse.
 2. With the Windows pointer controlling the Mac and both mapping switches
    enabled, press **Left Alt+Tab**. Confirm the **Mac app switcher appears**,
@@ -66,7 +68,10 @@ npm run build
 npm run test:ui
 ```
 
-Also run native Windows and Mac builds on dedicated runners. Native Windows
+Also run native Windows and Mac builds on local hosts. Actions minutes are
+unavailable; restoring hosted CI is not required for this test build. Run
+`node scripts/verify-local.mjs --native`, native desktop Clippy and the relevant
+platform checks. Record the source SHA, toolchain, results and hashes. Native Windows
 `WM_SYSKEY*` interception must be checked with a physical keyboard; synthetic
 hook packets cannot substitute. Real `CGEventPost` and cursor visibility
 must be checked on macOS. Distinguish runner scheduling failures (zero steps),

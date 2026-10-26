@@ -90,3 +90,17 @@ native test priorities; this checkpoint is an owner-authorized alpha merge.
 - Physical: Natural on/off; immediate first wheel, rapid/reversed/small scroll,
   multiple windows and displays, trackpad return direction, clipboard/file load,
   pause/reconnect/emergency and multi-hour use. See docs/TEST_0.1.5.md.
+
+## PR #3 active Windows source → Mac shortcuts — 2026-10-26
+
+- F02-H-PR3: Left Alt+Tab; held repeat; Shift reverse; balanced modifier release;
+  source stays Windows on return; global and per-Mac switches persist.
+- F02-E-PR3: unrelated-key interruption, AltGr/IME, full normal queue and urgent
+  handback, Pause/Quit/disconnect/revoke, display/session interruption.
+- Automated scope: source routing/unit regressions, encrypted integration,
+  preview settings/accessibility and the full-queue emergency-capture regression.
+- Physical scope remains pending: Windows shell interception, Mac CGEvent
+  delivery/visibility, real layouts and a 15-minute paired trial. Idle SharedKey
+  translation is a documented limitation, not a completed universal mode.
+- Commands/results: [TEST_PR3.md](../docs/TEST_PR3.md).
+  User/Mac order: [PR3_HANDOVER.md](../docs/PR3_HANDOVER.md).
